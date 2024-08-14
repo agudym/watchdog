@@ -1,0 +1,10 @@
+# pip install -r requirements.txt
+# python3.6 environment or later
+
+torch>=2.0
+torchvision
+opencv-python>=4.0
+numpy
+scipy
+scikit-learn
+matplotlib

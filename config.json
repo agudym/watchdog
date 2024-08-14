@@ -1,0 +1,39 @@
+{
+    "version": "0.1.0",
+    "Watchdog":
+    {
+        "output_path" : "",
+        "img_log_timeout" : 300,
+        "verbose" : true
+    },
+    "Detector" :
+    {
+        "Init" :
+        {
+            "yolo_lib_path" : "",
+            "checkpoint_path" : "",
+            "img_width_height_channels" : [1024, 576, 3],
+            "device_switch" : "auto",
+            "is_model_fp16" : false
+        },
+        "confidence_threshold" : 0.8,
+        "categories" : ["person", "bird", "cat", "dog"],
+        "bbox_merge_dist" : 0.01
+    },
+    "Bot" :
+    {
+        "bot_warning_timeout" : 30,
+        "token" : "",
+        "chat_id" : ""
+    },
+    "Cameras":
+    [
+        {
+            "uri": "",
+            "name": "",
+            "fps": 25.0,
+            "timeout_err": 30.0,
+            "count_err" : 100
+        }
+    ]
+}
