@@ -5,7 +5,7 @@
   </p>
 </p>
 <p align="center">
-    <img src="assets/watchdog.jpeg" alt="example" width=70%>
+    <img src="assets/watchdog.jpeg" alt="example" width=100%>
     <br>
     Light-weight framework for Objects AI-detection with Live-Cameras (USB/IP) and Telegram-bot notifications. Use Yolo or adjust for you own AI-models support and catch the best shot!
 </p>
@@ -14,7 +14,7 @@
 
 Installation for Linux, Win or Mac is similar. Jetson TX1/2 (Ubuntu18/Arm/Python3.6) works too! The three main steps are below:
 
-&nbsp;1. Download the watchdog and install required python-modules (linux-shell command):
+1. Download the watchdog and install required python-modules (linux-shell command):
 ```shell
 cd /home/user
 git clone https://github.com/agudym/watchdog.git
@@ -22,9 +22,9 @@ cd watchdog
 python -m pip install -r requirements.txt
 ```
 
-&nbsp;2. Get AI-detector and weights/configuration, YOLOv6 is supported at the moment. Or simply adjust `detector.py` for your model.<br>
-[Optional] For GPU(Nvidia CUDA) accelerated detection with Torch follow <a href="https://pytorch.org/get-started/locally/">instructions</a>. <br>
-[Optional] For Jetson TX1/2 with hardware accelerated camera's stream decoding build OpenCV with GStreamer using <a href="https://gist.github.com/mtc-20/c1f324f70fad774ca6f381c07cb3f19a">instructions</a>.
+2. Get AI-detector and weights/configuration, YOLOv6 is supported at the moment. Or simply adjust `detector.py` for your model.
+<br>
+[Optional] For GPU(Nvidia CUDA) accelerated detection with Torch follow <a href="https://pytorch.org/get-started/locally/">instructions</a>.
 ```shell
 cd ..
 git clone https://github.com/meituan/YOLOv6
@@ -33,13 +33,13 @@ wget https://github.com/meituan/YOLOv6/releases/download/0.4.0/yolov6n.pt
 ```
 Add 2 new paths to `config.json` (see below an example). Then run `python watchdog/detector.py config.json <path to test image dir>` to verify that detection works.
 
-&nbsp;3. [Optional] Register your watchdog-bot in Telegram: basically, send <a href="https://telegram.me/BotFather">@BotFather</a> the command `/newbot` to get token-string (keep it SECRET!).
+3. [Optional] Register your watchdog-bot in Telegram: basically, send <a href="https://telegram.me/BotFather">@BotFather</a> the command `/newbot` to get token-string (keep it SECRET!).
 <br>
-&nbsp;&nbsp;3.1. Start conversation with your new bot in Telegram (it won't respond so far, though).
+&#09;3.1. Start conversation with your new bot in Telegram (it won't respond so far, though).
 <br>
-&nbsp;&nbsp;3.2. Copy-paste the token to the configuration file `config.json`.
+&#09;3.2. Copy-paste the token to the configuration file `config.json`.
 <br>
-&nbsp;&nbsp;3.3. Run `python watchdog/bot.py configs/config.json` to initialize chat-id in the config.
+&#09;3.3. Run `python watchdog/bot.py configs/config.json` to initialize chat-id in the config.
 <br>
 Alright, the environment is set!
 
@@ -153,10 +153,12 @@ That's it! Now watchdog will record activity and Telegram-bot will speak and rep
     ]
 }
 ```
-Setting up hardware decoding could be tricky (especially for Jetson) but necessary to **avoid lags or delays** during streams processing. Use `gstreamer` to find the right pipeline, e.g.:
+## Notes
+Setting up hardware-accelerated decoding could be tricky but necessary to **avoid lags or delays** during streams processing. Use `gstreamer` application to find the right pipeline, e.g. linux-shell command (for Jetson TX1/2):
 ```shell
 gst-launch-1.0 rtspsrc location=rtsp://192.168.1.101 ! rtph264depay ! nvv4l2decoder ! nvvidconv ! video/x-raw, 'width=(int)1920, height=(int)1080, format=(string)BGRx' ! videoconvert ! nv3dsink max-buffers=1 drop=True
 ```
+Also specific build of OpenCV with GStreamer support might be required. For Jetson TX1/2 follow <a href="https://gist.github.com/mtc-20/c1f324f70fad774ca6f381c07cb3f19a">instructions</a>.
 ## License
 
 The library and it's sources are released under the [MIT License](./LICENSE).
