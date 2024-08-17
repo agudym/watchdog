@@ -14,7 +14,7 @@
 
 Installation for Linux, Win or Mac is similar. Jetson TX1/2 (Ubuntu18/Arm/Python3.6) works too! The three main steps are below:
 
-1. Download the watchdog and install required python-modules (linux-shell command):
+&nbsp;1. Download the watchdog and install required python-modules (linux-shell command):
 ```shell
 cd /home/user
 git clone https://github.com/agudym/watchdog.git
@@ -22,7 +22,7 @@ cd watchdog
 python -m pip install -r requirements.txt
 ```
 
-2. Get AI-detector and weights/configuration, YOLOv6 is supported at the moment. Or simply adjust `detector.py` for your model.<br>
+&nbsp;2. Get AI-detector and weights/configuration, YOLOv6 is supported at the moment. Or simply adjust `detector.py` for your model.<br>
 [Optional] For GPU(Nvidia CUDA) accelerated detection with Torch follow <a href="https://pytorch.org/get-started/locally/">instructions</a>. <br>
 [Optional] For Jetson TX1/2 with hardware accelerated camera's stream decoding build OpenCV with GStreamer using <a href="https://gist.github.com/mtc-20/c1f324f70fad774ca6f381c07cb3f19a">instructions</a>.
 ```shell
@@ -33,14 +33,14 @@ wget https://github.com/meituan/YOLOv6/releases/download/0.4.0/yolov6n.pt
 ```
 Add 2 new paths to `config.json` (see below an example). Then run `python watchdog/detector.py config.json <path to test image dir>` to verify that detection works.
 
-3. [Optional] Register your watchdog-bot in Telegram: basically, send <a href="https://telegram.me/BotFather">@BotFather</a> the command `/newbot` to get token-string (keep it SECRET!).
+&nbsp;3. [Optional] Register your watchdog-bot in Telegram: basically, send <a href="https://telegram.me/BotFather">@BotFather</a> the command `/newbot` to get token-string (keep it SECRET!).
 <br>
-3.1. Start conversation with your new bot in Telegram (it won't respond so far, though).
+&nbsp;&nbsp;3.1. Start conversation with your new bot in Telegram (it won't respond so far, though).
 <br>
-3.2. Copy-paste the token to the configuration file `config.json`.
+&nbsp;&nbsp;3.2. Copy-paste the token to the configuration file `config.json`.
 <br>
-3.3. Run `python watchdog/bot.py configs/config.json` to initialize chat-id in the config.
-
+&nbsp;&nbsp;3.3. Run `python watchdog/bot.py configs/config.json` to initialize chat-id in the config.
+<br>
 Alright, the environment is set!
 
 ## Cameras configration
