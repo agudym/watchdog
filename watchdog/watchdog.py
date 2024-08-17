@@ -1,13 +1,13 @@
-import multiprocessing.managers
 from typing import Dict, List, Optional
 
 import os, time, logging, shutil
 import concurrent.futures, multiprocessing
+import multiprocessing.managers
 import numpy as np
 
-from detector import DetectResult, Detector # should go before OpenCV due to some bug...
-from camera import CameraConfig, CamMultiprocReader, setup_logger
-from bot import CameraTeleBotComm
+from .detector import DetectResult, Detector # should go before OpenCV due to some bug...
+from .camera import CameraConfig, CamMultiprocReader, setup_logger
+from .bot import CameraTeleBotComm
 
 import cv2
 
@@ -200,16 +200,3 @@ class MultiCamWatchdog():
         mem_disk_rel = mem_disk_free / mem_disk_total
         mem_disk_GiB = mem_disk_free / 2**30
         return f"VRAM {mem_gpu_GiB:3.1f}GiB({mem_gpu_rel:.2f}); DISK {mem_disk_GiB:5.1f}GiB({mem_disk_rel:.2f})"
-
-if __name__ == "__main__":
-    import argparse, json
-
-    parser = argparse.ArgumentParser(description="Run watchdog. See ReadMe.md for help!")
-    parser.add_argument("config_json_path", type=str, help="Path to the main config file")
-    args = parser.parse_args()
-
-    with open(args.config_json_path, "r") as file:
-        config_dict = json.load(file)
-
-    # Set and run watchdog!
-    MultiCamWatchdog(config_dict)

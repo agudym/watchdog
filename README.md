@@ -31,27 +31,34 @@ git clone https://github.com/meituan/YOLOv6
 cd YOLOv6
 wget https://github.com/meituan/YOLOv6/releases/download/0.4.0/yolov6n.pt
 ```
-Add 2 new paths to `config.json` (see below an example). Then run `python detector.py config.json <path to some image dir>` to verify that detection works.
+Add 2 new paths to `config.json` (see below an example). Then run `python watchdog/detector.py config.json <path to test image dir>` to verify that detection works.
 
-3. [Optional] Register your watchdog-bot in Telegram: basically, send <a href="https://telegram.me/BotFather">@BotFather</a> the command `/newbot` to get token-string(keep it secret).<br>Start conversation with your new bot in Telegram (it won't respond so far, though).<br>Set the token in `config.json`, run `python bot.py config.json` to get integer chat-id in the log (particular channel you've just started).<br>Add chat-id to the `config.json`
+3. [Optional] Register your watchdog-bot in Telegram: basically, send <a href="https://telegram.me/BotFather">@BotFather</a> the command `/newbot` to get token-string (keep it SECRET!).
+<br>
+3.1. Start conversation with your new bot in Telegram (it won't respond so far, though).
+<br>
+3.2. Copy-paste the token to the configuration file `config.json`.
+<br>
+3.3. Run `python watchdog/bot.py configs/config.json` to initialize chat-id in the config.
 
 Alright, the environment is set!
 
 ## Cameras configration
 Last but not least is to **configure the cameras**. USB or IP, one or many - doesn't matter. First of all it's recommended to use <a href="https://www.videolan.org/vlc/">VLC</a> to check the camera (ip-connection). Then fill the missing fields in `config.json`.
-<br>Below is the complete example. Follow the descriptions there to setup your own configuration and run `python camera.py config.json` to make sure that images are captured correctly.
+<br>
+Below is the complete example. Follow the descriptions there to setup your own configuration and run `python watchdog/camera.py configs/config.json` to make sure that images are captured correctly.
 
 ## Start
 Execute something like:
 ```shell
 cd /home/user/watchdog
-python run_watchdog.py config.json
+python start_watchdog.py configs/config.json
 ```
-Or run detached process via e.g. temporal ssh-connection:
+Or run a detached process, e.g. via temporary shell ssh-connection (linux shell command):
 ```shell
-nohup python run_watchdog.py config.json &> log_nohup.txt &
+nohup python start_watchdog.py configs/config.json &> log_nohup.txt &
 ```
-That's it! Now watchdog-bot will react on your command and report!
+That's it! Now watchdog will record activity and Telegram-bot will speak and report!
 
 ## Configration example
 ```json
@@ -94,7 +101,7 @@ That's it! Now watchdog-bot will react on your command and report!
     {
         // How often the watchdog can bother via Telegram
         "bot_warning_timeout" : 30,
-        // The secret token received from the @BotFather
+        // The SECRET! token received from the @BotFather
         "token" : "1234567890:AaBbCcDdEeFfGg123AaBbCcDdEeFfGg",
         // Your bot-chat identifier (aquired from bot.py)
         "chat_id" : "987654321"
@@ -119,7 +126,7 @@ That's it! Now watchdog-bot will react on your command and report!
             "count_err" : 100
         },
         {
-            // The most universal approach for IP cameras
+            // The most universal approach for IP cameras supporting RTSP
             "uri": "rtsp://192.168.1.101",
             "name": "ip1",
             "fps": 15.0,
@@ -127,7 +134,7 @@ That's it! Now watchdog-bot will react on your command and report!
             "count_err" : 100
         },
         {
-            // Manually set pipeline for "older" camera with h264 stream for Jetson TX1/2
+            // Manually set GStreamer-pipeline for "older" camera with h264 stream for Jetson TX1/2 (hardware decoding without buffering)
             "uri": "rtspsrc location=rtsp://192.168.1.101 ! rtph264depay ! nvv4l2decoder ! nvvidconv ! video/x-raw, width=(int)1920, height=(int)1080, format=(string)BGRx ! videoconvert ! appsink max-buffers=1 drop=True",
             "name": "ip2_h264",
             "fps": 25.0,
@@ -135,7 +142,7 @@ That's it! Now watchdog-bot will react on your command and report!
             "count_err" : 100
         },
         {
-            // Manually set pipeline for h265 stream for Jetson TX1/2
+            // Manually set GStreamer-pipeline for h265 stream for Jetson TX1/2
             "uri": "rtspsrc location=rtsp://192.168.1.102 ! rtph265depay ! decodebin ! nvvidconv ! video/x-raw, width=(int)1920, height=(int)1080, format=(string)BGRx ! videoconvert ! appsink max-buffers=1 drop=True",
             "name": "ip2_h265",
             "fps": 25.0,

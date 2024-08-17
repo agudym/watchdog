@@ -1,3 +1,10 @@
+# Module for NN-detector wrappers:
+# Input - list of images(numpy-array);
+# Processing - torch-reshape (bi-linear), batch construction, inference;
+# Output - list of `DetectResult` objects, an auxiliary container for
+# category-ID, confidence, bounding box storage with drawing methods.
+# NOTE torch and all necessary NN-routines should be imported only here.
+
 from typing import Union, Tuple, List
 
 import sys, os
@@ -148,6 +155,8 @@ class DetectResult():
         return description + "."
 
 class Detector():
+    """ Wrapper for NN detector (should be extended for new models support) """
+
     @torch.inference_mode()
     def __init__(self,
                  yolo_lib_path:str,
@@ -169,7 +178,7 @@ class Detector():
         is_model_fp16
             Used by GPU, truncated operations for memory conservation.
         """
-        sys.path.insert(0, yolo_lib_path)
+        sys.path.insert(1, yolo_lib_path)
         from yolov6.layers.common import DetectBackend
 
         self.img_whc = img_width_height_channels

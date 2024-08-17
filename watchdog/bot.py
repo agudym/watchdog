@@ -44,7 +44,10 @@ class TeleBotComm:
                 if is_latest_msg and self.last_message_id >= msg_id:
                     continue
 
-                if self.chat_id is None or self.chat_id == msg_chat_id:
+                if self.chat_id is None:
+                    self.chat_id = msg_chat_id
+
+                if self.chat_id == msg_chat_id:
                     self.last_message_id = msg_id
                     logging.info(f"Message from chat {msg_chat_id}")
                     return msg["text"]
@@ -177,10 +180,10 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO)
 
-    parser = argparse.ArgumentParser(description="Verify Telegram bot communication, print chat-id. Bot-token is acquired from Telegram's '@BotFather').")
-    parser.add_argument("config_json_path", type=str, help="Path to the main config file with the token")
+    parser = argparse.ArgumentParser(description="Verify Telegram bot communication (with TOKEN from Telegram's '@BotFather'): acquires chat-id, updates config, and checks communication!")
+    parser.add_argument("config_json_path", type=str, help="Path to the main config file with the TOKEN")
     args = parser.parse_args()
-    
+
     with open(args.config_json_path, "r") as file:
         config_dict = json.load(file)
 
@@ -193,13 +196,21 @@ if __name__ == "__main__":
     if len(chat_id_str) == 0:
         # Logging chat id
         bot = TeleBotComm(token)
-    else:
-        bot = CameraTeleBotComm(0,0.99,["person", "dog", "cat", "car"], token, int(chat_id_str))
+        if bot.chat_id is None :
+            raise RuntimeError("No active user messages found, unable to get chat-id. Text something to the bot and restart!")
+        chat_id_str = str(bot.chat_id)
+        with open(args.config_json_path, "w") as file:
+            config_dict["Bot"]["chat_id"] = chat_id_str
+            file.write(json.dumps(config_dict, indent=4))
+        print("Chat-id is set!")
 
-        print("Bot is ready! Check your Telegram...")
-        assert bot.send_message("Try to set some parameter..."), "Test failed"
-        while True:
-            if bot.parse():
-                break
-            time.sleep(1)
-        print("Test's passed!")
+    bot = CameraTeleBotComm(0,0.99,["person", "dog", "cat", "car"], token, int(chat_id_str))
+    print("Bot is ready! Check your Telegram...")
+    if not bot.send_message("Try to set some parameter..."):
+        raise RuntimeError("Communication failure!")
+
+    while True:
+        if bot.parse() and bot.send_message("Bot test-run ends..."):
+            print("Communication works!")
+            break
+        time.sleep(1)
