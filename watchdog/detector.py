@@ -123,7 +123,7 @@ class DetectResult():
                     confidence.append(np.mean( confidence_masked[mask_cluster]) )
                     bboxes.append(np.mean( bboxes_masked[mask_cluster], axis=0 ))
 
-        return DetectResult(category_ids, confidence, np.array(bboxes))
+        return DetectResult(category_ids, confidence, np.array(bboxes).reshape((-1, 4)))
 
     def draw(self, image_orig: np.ndarray) :
         """
@@ -179,7 +179,7 @@ class Detector():
             Used by GPU, truncated operations for memory conservation.
         """
         sys.path.insert(1, yolo_lib_path)
-        from yolov6.layers.common import DetectBackend
+        from models.common import DetectMultiBackend
 
         self.img_whc = img_width_height_channels
         self._is_model_fp16 = is_model_fp16
@@ -200,13 +200,7 @@ class Detector():
         if not os.path.exists(checkpoint_path) :
             raise ValueError(f"{checkpoint_path}.pt not found!")
         else:
-            self._yolo = DetectBackend(checkpoint_path, device=self._device)
-            self._yolo.model = self._yolo.model.eval()
-
-            if self._is_model_fp16 :
-                self._yolo.model = self._yolo.model.half()
-            else:
-                self._yolo.model = self._yolo.model.float()
+            self._yolo = DetectMultiBackend(checkpoint_path, device=self._device, fp16=self._is_model_fp16)
 
             w, h, c = self.img_whc
             assert c == 3, "Only 3-channel images supported"
@@ -254,7 +248,7 @@ class Detector():
                 img = self._resizer(img)
             imgs_batch.append(img)
 
-        detect_tensor = self._yolo(torch.stack(imgs_batch))
+        detect_tensor = self._yolo(torch.stack(imgs_batch))[0].permute(0, 2, 1)
 
         detect_results = []
         for img_id, prediction_tensor in enumerate(detect_tensor):
@@ -277,12 +271,12 @@ class Detector():
             confidence_threshold: float,
             categories:List[str]) :
         assert prediction_tensor.ndim == 2
-        assert prediction_tensor.shape[-1] == 5 + len(DetectResult.category_names_coco)
+        assert prediction_tensor.shape[-1] == 4 + len(DetectResult.category_names_coco)
 
         category_ids_subset = np.where(np.isin(DetectResult.category_names_coco, categories))[0]
         category_ids_subset = torch.Tensor(category_ids_subset).to(prediction_tensor.device)
 
-        class_probs_all = prediction_tensor[:, 5:]
+        class_probs_all = prediction_tensor[:, 4:]
         category_ids = torch.argmax(class_probs_all, dim=-1)
         class_confidences = torch.take_along_dim(class_probs_all, category_ids[:, None], dim=-1).flatten()
 

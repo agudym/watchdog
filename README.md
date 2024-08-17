@@ -22,14 +22,14 @@ cd watchdog
 python -m pip install -r requirements.txt
 ```
 
-&nbsp;2. Get AI-detector and weights/configuration, YOLOv6 is supported at the moment. Or simply adjust `detector.py` for your model.
+&nbsp;2. Get AI-detector and weights/configuration, YOLOv9 (2024) is supported at the moment. Or simply adjust `detector.py` for your model.
 <br>
 &nbsp;[Optional] For GPU(Nvidia CUDA) accelerated detection with Torch follow <a href="https://pytorch.org/get-started/locally">instructions</a>.
 ```shell
 cd ..
-git clone https://github.com/meituan/YOLOv6
-cd YOLOv6
-wget https://github.com/meituan/YOLOv6/releases/download/0.4.0/yolov6n.pt
+git clone https://github.com/WongKinYiu/yolov9.git
+cd yolov9
+wget https://github.com/WongKinYiu/yolov9/releases/download/v0.1/yolov9-m-converted.pt
 ```
 &nbsp;Add 2 new paths to `config.json` (see below an example). Then run `python watchdog/detector.py config.json <path to test image dir>` to verify that detection works.
 
@@ -79,9 +79,9 @@ That's it! Now watchdog will record activity and Telegram-bot will speak and rep
         "Init" :
         {
             // Path to the Yolo library (current version doesn't support installation)
-            "yolo_lib_path" : "/home/user/YOLOv6",
+            "yolo_lib_path" : "/home/user/yolov9",
             // Path to the model weights
-            "checkpoint_path" : "/home/user/YOLOv6/yolov6n.pt",
+            "checkpoint_path" : "/home/user/yolov9/yolov9-m-converted.pt",
             // Resolution used for faster inference, so far it's (1920, 1080) * k, k = 1024 / 1920.
             // Adjust if cameras have another aspect (padding might be needed, e.g. w/h mod 32 == 0)
             "img_width_height_channels" : [1024, 576, 3],
