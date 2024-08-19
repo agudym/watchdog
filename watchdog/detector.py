@@ -178,9 +178,6 @@ class Detector():
         is_model_fp16
             Used by GPU, truncated operations for memory conservation.
         """
-        sys.path.insert(1, yolo_lib_path)
-        from models.common import DetectMultiBackend
-
         self.img_whc = img_width_height_channels
         self._is_model_fp16 = is_model_fp16
 
@@ -200,15 +197,21 @@ class Detector():
         if not os.path.exists(checkpoint_path) :
             raise ValueError(f"{checkpoint_path}.pt not found!")
         else:
-            self._yolo = DetectMultiBackend(checkpoint_path, device=self._device, fp16=self._is_model_fp16)
+            # Yolo is required for complete model load (`weights_only` = False)
+            sys.path.insert(1, yolo_lib_path)
+
+            checkpoint = torch.load(checkpoint_path, map_location=self._device, weights_only=False)
+            self._yolo = checkpoint["model"].float().fuse().eval()
+            if self._is_model_fp16:
+                self._yolo = self._yolo.half()
+            model_stride = 32
 
             w, h, c = self.img_whc
             assert c == 3, "Only 3-channel images supported"
 
-            s = self._yolo.stride
-            if (w % s) or (h % s):
+            if (w % model_stride) or (h % model_stride):
                 raise ValueError(
-                    f"Loaded model doesn't support {self.img_whc} size, padding (mod {s}) is required!" )
+                    f"Loaded model doesn't support {self.img_whc} size, padding (mod {model_stride}) is required!" )
 
             self._resizer = Resize((h, w), interpolation=InterpolationMode.BILINEAR, antialias=False)
 
