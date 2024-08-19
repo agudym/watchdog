@@ -200,7 +200,7 @@ class Detector():
             # Yolo is required for complete model load (`weights_only` = False)
             sys.path.insert(1, yolo_lib_path)
 
-            checkpoint = torch.load(checkpoint_path, map_location=self._device, weights_only=False)
+            checkpoint = torch.load(checkpoint_path, map_location=self._device)# , weights_only=False # torch 1.10 support
             self._yolo = checkpoint["model"].float().fuse().eval()
             if self._is_model_fp16:
                 self._yolo = self._yolo.half()
