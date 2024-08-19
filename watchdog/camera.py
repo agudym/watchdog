@@ -160,9 +160,7 @@ class CamMultiprocReader():
 
     def stop(self):
         self._is_running_shared.value = False
-        for future in self._capturing_futures:
-            if future is not None:
-                future.result()
+        concurrent.futures.wait([future for future in self._capturing_futures if future is not None])
 
     def _restart(self):
         for cam_id, cam_conf in enumerate(self._cams_conf):

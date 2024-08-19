@@ -20,7 +20,7 @@ class MultiCamWatchdog():
             self._executor = concurrent.futures.ProcessPoolExecutor(max_workers=1)
             self._manager = multiprocessing.Manager()
             self._ns = self._manager.Namespace() # multi-process interchange
-            self._jobs = []
+            self._saving_futures = []
 
             self._output_path = config_dict["Watchdog"]["output_path"]
             if not os.path.exists(self._output_path):
@@ -29,6 +29,10 @@ class MultiCamWatchdog():
             setup_logger(
                 config_dict["Watchdog"]["verbose"],
                 filepath=os.path.join(self._output_path, "log.txt"))
+
+            self._stop_file = os.path.join(self._output_path, "stop")
+            if os.path.exists(self._stop_file):
+                raise RuntimeError(f"Can't start, because {self._stop_file} file already exists, delete it first.")
 
             # Init Yolo-detector
             self._detector = Detector(**config_dict["Detector"]["Init"])
@@ -60,8 +64,14 @@ class MultiCamWatchdog():
                     self._ns.detect_conf_thr,
                     self._ns.detect_categories,
                     token, int(chat_id_str) )
+            
+            while not self._is_user_stopped():
+                concurrent.futures.wait(self._saving_futures)
+                try:
+                    self._run_pipeline()
+                except concurrent.futures.process.BrokenProcessPool as e:
+                    logging.error(f"{repr(e)}. Restart...")
 
-            self._run_pipeline()
         except Exception as e:
             logging.critical(repr(e))
             raise
@@ -69,7 +79,7 @@ class MultiCamWatchdog():
     def _run_pipeline(self):
         with CamMultiprocReader(self._cams_config) as cams_reader:
             detections_total = [0] * len(self._cams_config)
-            while True: # Capture till the End of Time...
+            while not self._is_user_stopped() :
                 timestamp_str, self._ns.start_time = time.strftime(f"%Y%m%d_%H%M%S"), time.time()
 
                 img_root_path = os.path.join(self._output_path, timestamp_str[:8])# new folder everyday!
@@ -77,6 +87,7 @@ class MultiCamWatchdog():
                     os.makedirs(img_root_path)
 
                 img_cams_all = cams_reader.read_frames()
+
                 img_cams_act = [img for img in img_cams_all if img is not None]
                 if len(img_cams_act) > 0:
                     detections_act = self._detector.detect(
@@ -140,6 +151,9 @@ class MultiCamWatchdog():
                     ns.bot_warning_timeout = bot.warning_timeout
                     ns.detect_conf_thr = bot.detect_conf_thr
                     ns.detect_categories = bot.detect_categories
+
+                    if bot.exit:
+                        _ = bot.send_message("Goodbye!")
                 ns.bot = bot # trigger bot update for all processes
 
             if bot_status_request or is_img_log_active :
@@ -190,9 +204,9 @@ class MultiCamWatchdog():
             logging.error(f"Notifier exception: {repr(e)}")
 
     def _run_process(self, function, *args) :
-        self._jobs = [job for job in self._jobs if not job.done()]
-        logging.debug(f"Active notify jobs {len(self._jobs)}.")
-        self._jobs.append(self._executor.submit(function, *args))
+        self._saving_futures = [job for job in self._saving_futures if not job.done()]
+        logging.debug(f"Active notify jobs {len(self._saving_futures)}.")
+        self._saving_futures.append(self._executor.submit(function, *args))
 
     def _desc_mem(self, path:str) :
         mem_gpu_GiB, mem_gpu_rel = self._detector.get_device_memory_available()
@@ -200,3 +214,12 @@ class MultiCamWatchdog():
         mem_disk_rel = mem_disk_free / mem_disk_total
         mem_disk_GiB = mem_disk_free / 2**30
         return f"VRAM {mem_gpu_GiB:3.1f}GiB({mem_gpu_rel:.2f}); DISK {mem_disk_GiB:5.1f}GiB({mem_disk_rel:.2f})"
+
+    def _is_user_stopped(self):
+        if os.path.exists(self._stop_file):
+            logging.info(f"The Watchdog has been stopped with {self._stop_file}.")
+            return True
+        if self._ns.bot is not None and self._ns.bot.exit :
+            logging.info(f"The Watchdog has been stopped with the bot.")
+            return True
+        return False

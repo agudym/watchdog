@@ -103,6 +103,9 @@ class CameraTeleBotComm(TeleBotComm):
         self.status = False
         self._args_desc["S"] = "Flag to get current system's status (no value)"
 
+        self.exit = False
+        self._args_desc["X"] = "Flag to stop the watchdog (no value), the operation is irreversible."
+
         self.warning_timeout = warning_timeout
         self._args_desc["T"] = "Minimal interval between the warning messages [seconds], e.g. 'T 30'"
         
@@ -148,6 +151,9 @@ class CameraTeleBotComm(TeleBotComm):
         if parameter_name == "S":
             value = True
             self.status = value
+        elif parameter_name == "X":
+            value = True
+            self.exit = value
         elif len(msg_split) >= 2:
             if parameter_name == "T":
                 value = np.clip(float(msg_split[1]), 0, 3600 * 24) # snooze for a day

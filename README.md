@@ -44,21 +44,26 @@ wget https://github.com/WongKinYiu/yolov9/releases/download/v0.1/yolov9-m-conver
 Alright, the environment is set!
 
 ## Cameras configration
-Last but not least is to **configure the cameras**. USB or IP, one or many - doesn't matter. First of all it's recommended to use <a href="https://www.videolan.org/vlc/">VLC</a> to check the camera (ip-connection). Then fill the missing fields in `config.json`.
+Last but not least is to **configure the cameras**. USB or IP, one or many - doesn't matter. First of all it's recommended to use <a href="https://www.videolan.org/vlc/">VLC</a> to check the camera (ip-connection). Then fill the missing fields in `configs/config.json`.
 <br>
 Below is the complete example. Follow the descriptions there to setup your own configuration and run `python watchdog/camera.py configs/config.json` to make sure that images are captured correctly.
 
 ## Start
-Execute something like:
+When the missing fields from `configs/config.json` are filled, run the Watchdog by executing the `start_watchdog.py`, e.g.:
 ```shell
 cd /home/user/watchdog
 python start_watchdog.py configs/config.json
 ```
-Or run a detached process, e.g. via temporary shell ssh-connection (linux shell command):
+Or, for example, run a detached process via temporary ssh-connection (linux-shell command):
 ```shell
 nohup python start_watchdog.py configs/config.json &> log_nohup.txt &
 ```
 That's it! Now watchdog will record activity and Telegram-bot will speak and report!
+<br>
+To interrupt the watchdog-process - create an empty file with the name `stop` in the `output_path`, e.g. (linux-shell command):
+```shell
+touch /home/user/recordings/stop
+```
 
 ## Configration example
 ```json
