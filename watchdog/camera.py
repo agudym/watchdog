@@ -1,4 +1,4 @@
-import os, time, pathlib, re, logging
+import sys, os, time, pathlib, re, logging
 
 from typing import List, Union, Tuple, Optional, Dict
 
@@ -260,14 +260,33 @@ class FolderImgReader():
         return True
 
 def setup_logger(verbose:bool, filepath:Optional[str] = None) :
+    class StreamToLogger(object):
+        """
+        Redirect STDOUT and STDERR to the root-log
+        originates from 
+        https://stackoverflow.com/questions/19425736/how-to-redirect-stdout-and-stderr-to-logger-in-python
+        """
+        def __init__(self, logger:logging.Logger, level:int):
+            self.logger = logger
+            self.level = level
+            self.linebuf = ''
+        def write(self, buf:str):
+            for line in buf.rstrip().splitlines():
+                self.logger.log(self.level, line.rstrip())
+        def flush(self):
+            pass
+
     logging.basicConfig(
         filename=filepath,
         # "w"-mode might not work, for root-log file-writing (e.g. collision with other loggers or some bug?)
         filemode="a",
         format="%(asctime)s %(process)6d %(levelname)8s %(message)s",
-        datefmt="%Y.%m.%d %H:%M:%S",
         #encoding="utf-8", # not supported in 3.6
         level=logging.INFO if verbose else logging.ERROR)
+    
+    root_log = logging.getLogger("")
+    sys.stdout = StreamToLogger(root_log, logging.INFO)
+    sys.stderr = StreamToLogger(root_log, logging.ERROR)
 
 if __name__ == "__main__":
     import argparse, json
