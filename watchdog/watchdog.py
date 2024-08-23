@@ -69,7 +69,7 @@ class MultiCamWatchdog():
                 concurrent.futures.wait(self._saving_futures)
                 try:
                     self._run_pipeline()
-                except concurrent.futures.process.BrokenProcessPool as e:
+                except (concurrent.futures.process.BrokenProcessPool, BrokenPipeError) as e:
                     logging.error(f"{repr(e)}. Restart...")
 
         except Exception as e:
