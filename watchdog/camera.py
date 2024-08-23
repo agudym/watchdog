@@ -271,19 +271,18 @@ def setup_logger(verbose:bool, filepath:Optional[str] = None) :
             self.level = level
             self.linebuf = ''
         def write(self, buf:str):
-            for line in buf.rstrip().splitlines():
-                self.logger.log(self.level, line.rstrip())
+            for line in buf.splitlines():
+                line = line.rstrip()
+                if len(line) > 0:
+                    self.logger.log(self.level, line)
         def flush(self):
             pass
 
     logging.basicConfig(
-        filename=filepath,
-        # "w"-mode might not work, for root-log file-writing (e.g. collision with other loggers or some bug?)
-        filemode="a",
         format="%(asctime)s %(process)6d %(levelname)8s %(message)s",
-        #encoding="utf-8", # not supported in 3.6
+        handlers=[logging.FileHandler(filepath, encoding="utf-8")] if filepath is not None else None,
         level=logging.INFO if verbose else logging.ERROR)
-    
+
     root_log = logging.getLogger("")
     sys.stdout = StreamToLogger(root_log, logging.INFO)
     sys.stderr = StreamToLogger(root_log, logging.ERROR)
