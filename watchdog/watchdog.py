@@ -4,6 +4,7 @@ import os, time, logging, shutil
 import concurrent.futures, multiprocessing
 import multiprocessing.managers
 import numpy as np
+import psutil
 
 from .detector import DetectResult, Detector # should go before OpenCV due to some bug...
 from .camera import CameraConfig, CamMultiprocReader, setup_logger
@@ -117,8 +118,8 @@ class MultiCamWatchdog():
 
                 inference_time = time.time() - self._ns.start_time
                 statistics_msg = f"Inference({len(img_cams_act):3} cams) {inference_time:5.3f} sec. " \
-                                 f"Free space: {self._desc_mem(img_root_path)}. " \
-                                 f"Detections by camera: {detections_total}."
+                                 f"Detections: {detections_total}. " \
+                                 f"{self._get_system_resources(img_root_path)}"
                 logging.info(statistics_msg)
 
                 # Save images and send log message (if bot-status request happened)
@@ -208,12 +209,24 @@ class MultiCamWatchdog():
         logging.debug(f"Active notify jobs {len(self._saving_futures)}.")
         self._saving_futures.append(self._executor.submit(function, *args))
 
-    def _desc_mem(self, path:str) :
+    def _get_system_resources(self, path:str) :
+        """ Describe CPU load, RAM, VRAM, DISK memory available """
         mem_gpu_GiB, mem_gpu_rel = self._detector.get_device_memory_available()
+        mem_gpu_desc = f"{mem_gpu_GiB:3.1f}GiB({mem_gpu_rel:.2f})"
+
+        mem_ram_total, mem_ram_free = psutil.virtual_memory().total, psutil.virtual_memory().available
+        mem_ram_rel = mem_ram_free / mem_ram_total
+        mem_ram_GiB = mem_ram_free / 2**30
+        mem_ram_desc = f"{mem_ram_GiB:3.1f}GiB({mem_ram_rel:.2f})"
+
         mem_disk_total, _, mem_disk_free = shutil.disk_usage(path)
         mem_disk_rel = mem_disk_free / mem_disk_total
         mem_disk_GiB = mem_disk_free / 2**30
-        return f"VRAM {mem_gpu_GiB:3.1f}GiB({mem_gpu_rel:.2f}); DISK {mem_disk_GiB:5.1f}GiB({mem_disk_rel:.2f})"
+        mem_disk_desc = f"{mem_disk_GiB:5.1f}GiB({mem_disk_rel:.2f})"
+
+        cpu_usage = ", ".join([f"{v/100:.2f}" for v in psutil.cpu_percent(percpu=True)])
+
+        return f"Free space: RAM {mem_ram_desc}; VRAM {mem_gpu_desc}; DISK {mem_disk_desc}. CPU usage: [{cpu_usage}]."
 
     def _is_user_stopped(self):
         if os.path.exists(self._stop_file):
