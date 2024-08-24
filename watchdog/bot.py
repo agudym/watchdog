@@ -104,13 +104,13 @@ class CameraTeleBotComm(TeleBotComm):
         self._args_desc["S"] = "Flag to get current system's status (no value)"
 
         self.exit = False
-        self._args_desc["X"] = "Flag to stop the watchdog (no value), the operation is irreversible."
+        self._args_desc["X"] = "Flag to stop the watchdog (no value), the operation is irreversible"
 
         self.warning_timeout = warning_timeout
         self._args_desc["T"] = "Minimal interval between the warning messages [seconds], e.g. 'T 30'"
         
         self.detect_conf_thr = detect_conf_thr
-        self._args_desc["P"] = "Detection confidence/probability threshold [0-1], e.g. 'P 0.5'"
+        self._args_desc["P"] = "Detection confidence/probability threshold [0.1 ... 1], e.g. 'P 0.5', or 'P 1' to disable all notifications"
 
         self.detect_categories = detect_categories
         self._args_desc["O"] = "List of object categories to detect, e.g. 'O person dog cat bird'"
