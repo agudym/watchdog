@@ -1,16 +1,16 @@
-from typing import Dict, List, Optional
+from typing import Dict, List
 
-import os, time, logging, shutil
+import os, time, logging
 import concurrent.futures, multiprocessing
 import multiprocessing.managers
 import numpy as np
-import psutil
 
-from .detector import DetectResult, Detector # should go before OpenCV due to some bug...
-from .camera import CameraConfig, CamMultiprocReader, setup_logger
-from .bot import CameraTeleBotComm
-
+# sklearn should go before cv2 due to some bug...
+from .camera import CameraConfig, CamMultiprocReader
 import cv2
+
+from .bot import CameraTeleBotComm
+from .utils import DetectResult, setup_logger, desc_system_resources
 
 class MultiCamWatchdog():
     """ Director of multi-camera(multi-process) capture and nn-model detection """
@@ -36,10 +36,12 @@ class MultiCamWatchdog():
                 raise RuntimeError(f"Can't start, because {self._stop_file} file already exists, delete it first.")
 
             # Init Yolo-detector
-            self._detector = Detector(**config_dict["Detector"]["Init"])
+            self._config_yolo_detector = config_dict["Detector"]["Init"]
 
             # Key Detection parameters
-            self._ns.detect_categories = config_dict["Detector"]["categories"]
+            self._ns.category_names_all = config_dict["Detector"]["categories_all"].split(",")
+            category_names_notify = config_dict["Detector"]["categories_notify"].split(",")
+            self._ns.category_ids_notify = DetectResult.get_ids(self._ns.category_names_all, category_names_notify)
             self._ns.detect_conf_thr = config_dict["Detector"]["confidence_threshold"]
             self._ns.bbox_merge_dist = config_dict["Detector"]["bbox_merge_dist"]
 
@@ -63,9 +65,9 @@ class MultiCamWatchdog():
                 self._ns.bot = CameraTeleBotComm(
                     self._ns.bot_warning_timeout,
                     self._ns.detect_conf_thr,
-                    self._ns.detect_categories,
+                    self._ns.category_names_all,
+                    category_names_notify,
                     token, int(chat_id_str) )
-            
             while not self._is_user_stopped():
                 concurrent.futures.wait(self._saving_futures)
                 try:
@@ -79,6 +81,11 @@ class MultiCamWatchdog():
 
     def _run_pipeline(self):
         with CamMultiprocReader(self._cams_config) as cams_reader:
+            # Imports Pytorch, AFTER camera processes start to preserve memory
+            # TODO make a separate detection process
+            from .detector import Detector
+            detector = Detector(**self._config_yolo_detector)
+
             detections_total = [0] * len(self._cams_config)
             while not self._is_user_stopped() :
                 timestamp_str, self._ns.start_time = time.strftime(f"%Y%m%d_%H%M%S"), time.time()
@@ -91,8 +98,8 @@ class MultiCamWatchdog():
 
                 img_cams_act = [img for img in img_cams_all if img is not None]
                 if len(img_cams_act) > 0:
-                    detections_act = self._detector.detect(
-                        img_cams_act, self._ns.detect_conf_thr, self._ns.detect_categories)
+                    detections_act = detector.detect(
+                        img_cams_act, self._ns.detect_conf_thr, self._ns.category_ids_notify)
                 else:
                     detections_act = []
 
@@ -119,7 +126,7 @@ class MultiCamWatchdog():
                 inference_time = time.time() - self._ns.start_time
                 statistics_msg = f"Inference({len(img_cams_act):3} cams) {inference_time:5.3f} sec. " \
                                  f"Detections: {detections_total}. " \
-                                 f"{self._get_system_resources(img_root_path)}"
+                                 f"{desc_system_resources(img_root_path)}"
                 logging.info(statistics_msg)
 
                 # Save images and send log message (if bot-status request happened)
@@ -151,7 +158,7 @@ class MultiCamWatchdog():
 
                     ns.bot_warning_timeout = bot.warning_timeout
                     ns.detect_conf_thr = bot.detect_conf_thr
-                    ns.detect_categories = bot.detect_categories
+                    ns.category_ids_notify = DetectResult.get_ids(ns.category_names_all, bot.categories_notify)
 
                     if bot.exit:
                         _ = bot.send_message("Goodbye!")
@@ -186,11 +193,11 @@ class MultiCamWatchdog():
             is_bot_warn_active = ns.start_time - ns.bot_warning_time > ns.bot_warning_timeout
 
             detection_m = detection.merge(ns.bbox_merge_dist)
-            description = f"{cam_desc}: {detection_m.describe()}"
+            description = f"{cam_desc}: {detection_m.describe(ns.category_names_all)}"
             logging.info(description)
 
             img_path = img_path_prefix + "_detect.jpg"
-            cv2.imwrite(img_path, detection_m.draw(image))
+            cv2.imwrite(img_path, detection_m.draw(image, ns.category_names_all))
 
             if is_bot_warn_active and ns.bot is not None:
                 is_ok1 = ns.bot.send_message(description)
@@ -209,25 +216,6 @@ class MultiCamWatchdog():
         logging.debug(f"Active notify jobs {len(self._saving_futures)}.")
         self._saving_futures.append(self._executor.submit(function, *args))
 
-    def _get_system_resources(self, path:str) :
-        """ Describe CPU load, RAM, VRAM, DISK memory available """
-        mem_gpu_GiB, mem_gpu_rel = self._detector.get_device_memory_available()
-        mem_gpu_desc = f"{mem_gpu_GiB:3.1f}GiB({mem_gpu_rel:.2f})"
-
-        mem_ram_total, mem_ram_free = psutil.virtual_memory().total, psutil.virtual_memory().available
-        mem_ram_rel = mem_ram_free / mem_ram_total
-        mem_ram_GiB = mem_ram_free / 2**30
-        mem_ram_desc = f"{mem_ram_GiB:3.1f}GiB({mem_ram_rel:.2f})"
-
-        mem_disk_total, _, mem_disk_free = shutil.disk_usage(path)
-        mem_disk_rel = mem_disk_free / mem_disk_total
-        mem_disk_GiB = mem_disk_free / 2**30
-        mem_disk_desc = f"{mem_disk_GiB:5.1f}GiB({mem_disk_rel:.2f})"
-
-        cpu_usage = ", ".join([f"{v/100:.2f}" for v in psutil.cpu_percent(percpu=True)])
-
-        return f"Free space: RAM {mem_ram_desc}; VRAM {mem_gpu_desc}; DISK {mem_disk_desc}. CPU usage: [{cpu_usage}]."
-
     def _is_user_stopped(self):
         if os.path.exists(self._stop_file):
             logging.info(f"The Watchdog has been stopped with {self._stop_file}.")
@@ -236,3 +224,14 @@ class MultiCamWatchdog():
             logging.info(f"The Watchdog has been stopped with the bot.")
             return True
         return False
+
+if __name__ == "__main__":
+    import argparse
+    from .utils import load_config
+    parser = argparse.ArgumentParser(description="Run watchdog: Initialize detector, cameras and communication bot, according to the configuration. "
+                                             " Create empty file 'stop' in the output dir to interrupt the process. See ReadMe.md for help!")
+    parser.add_argument("config_json_path", type=str, help="Path to the main config file")
+    args = parser.parse_args()
+
+    # Set and run watchdog!
+    MultiCamWatchdog(load_config(args.config_json_path))

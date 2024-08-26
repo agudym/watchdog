@@ -3,156 +3,20 @@
 # Processing - torch-reshape (bi-linear), batch construction, inference;
 # Output - list of `DetectResult` objects, an auxiliary container for
 # category-ID, confidence, bounding box storage with drawing methods.
-# NOTE torch and all necessary NN-routines should be imported only here.
+# NOTE torch and all necessary NN-routines should be imported only here
+# in order to minimize memory allocations out of the main (detection) process
 
 from typing import Union, Tuple, List
 
-import sys, os
-import logging
+import sys, os, logging
 
 import numpy as np
-from numpy.random import MT19937, RandomState, SeedSequence
 
 import torch
 from torchvision.transforms import Resize
 from torchvision.transforms.functional import InterpolationMode
 
-import matplotlib.pyplot as plt
-
-from sklearn.cluster import DBSCAN # should go before OpenCV due to some bug...
-import cv2
-
-def _get_category_colors(num_classes:int):
-    rs = RandomState(MT19937(SeedSequence(0)))
-    cmap = plt.get_cmap("hsv", num_classes) # cm.get_cmap
-    colors = []
-    for i in rs.permutation(np.arange(num_classes)):
-        color = cmap(i)
-        colors.append([int(color[j] * 255) for j in range(3)])
-    return colors
-
-class DetectResult():
-    """
-    List of detected objects (class/object category IDs), confidences, bounding boxes. With auxiliary image-drawing routines.
-
-    Each individual image must have a specific `DetectResult`.
-    """
-
-    # List of all detectable 80 classes from COCO 2017 dataset http://cocodataset.org
-    category_names_coco = [ 'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light',
-            'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow',
-            'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee',
-            'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard',
-            'tennis racket', 'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple',
-            'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch',
-            'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote', 'keyboard', 'cell phone',
-            'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear',
-            'hair drier', 'toothbrush' ]
-
-    # Randomized individual class colors
-    category_colors = _get_category_colors(len(category_names_coco))
-    
-    def __init__(self,
-                 category_ids : Union[np.ndarray, List[int]] = [],
-                 confidence : Union[np.ndarray, List[float]] = [],
-                 bboxes : np.ndarray = np.empty((0, 4)) ) :
-        """
-        Parameters:
-        -----------
-        category_ids
-            Detected object category identifier in [0, N], N is the num all possible category, shape (M,), M - num found objects.
-        confidence
-            Probability [0, 1] that the detected object belongs to the particular class, shape (M,).
-        bboxes
-            Axis-aligned bounding box (x_lower, y_lower, x_upper, y_upper), coordinates normalized to [0,1], shape (M,4).
-        """
-        assert len(bboxes) == len(category_ids) and len(bboxes) == len(confidence)
-        assert bboxes.shape[1] == 4
-
-        self.category_ids = np.array(category_ids)
-        self.confidence = np.array(confidence)
-        self.bboxes = bboxes
-
-    @property
-    def num_objects(self):
-        return len(self.category_ids)
-
-    def merge(self, bbox_merge_dist: float):
-        """
-        Merge very close Bounding Boxes (4-vector), likely for the same object, using DBSCAN.
-
-        Bounding boxes are normalized, i.e. clustering coordinates space is [0,1]^4.
-        
-        Parameters:
-        -----------
-        bbox_merge_dist
-            Maximal distance (1 - whole image 1D size!) between identical bounding boxes, e.g.
-            belonging to the same object.
-        
-        Return:
-        -------
-        `DetectResult` with merged bounding boxes belonging to the same object (likely).
-        """
-        if bbox_merge_dist == 0.:
-            return self
-
-        dbscan = DBSCAN(eps=bbox_merge_dist, min_samples=2)
-        
-        category_ids = []
-        confidence = []
-        bboxes = []
-        for category_id in set(self.category_ids) :
-            mask = self.category_ids == category_id
-            if np.sum(mask) == 0 :
-                continue
-            bboxes_masked = self.bboxes[mask]
-            confidence_masked = self.confidence[mask]
-            dbscan.fit(bboxes_masked)
-
-            match_clusters = set(dbscan.labels_)
-            for cluster_id in match_clusters :
-                mask_cluster = cluster_id == dbscan.labels_
-
-                if cluster_id < 0: # -1 - each instance added individually
-                    for obj_id in np.where(mask_cluster)[0] :
-                        category_ids.append(category_id)
-                        confidence.append(confidence_masked[obj_id])
-                        bboxes.append(bboxes_masked[obj_id])
-                else:
-                    category_ids.append(category_id)
-                    confidence.append(np.mean( confidence_masked[mask_cluster]) )
-                    bboxes.append(np.mean( bboxes_masked[mask_cluster], axis=0 ))
-
-        return DetectResult(category_ids, confidence, np.array(bboxes).reshape((-1, 4)))
-
-    def draw(self, image_orig: np.ndarray) :
-        """
-        Draw found object's bounding boxes in the image (return modified copy).
-        """
-        image = image_orig.copy()
-        h, w, _ = image.shape
-        
-        bboxes_pix = (self.bboxes * (w,h,w,h)).astype(int)
-        for category_id, conf, bbox in zip(self.category_ids, self.confidence, bboxes_pix) :
-            c = self.category_colors[category_id]
-            text = f"{self.category_names_coco[category_id]} {conf:.2f}"
-            cv2.putText(image, text, tuple(bbox[:2]), cv2.FONT_HERSHEY_SIMPLEX, 1, c, thickness=2)
-            cv2.rectangle(image, tuple(bbox[:2]), tuple(bbox[2:]), c, 1)
-            # For the history - work with matplotlib
-            # w, h = bbox[2:] - (x,y)
-            # ax.add_patch(patches.Rectangle(
-            #     (x,y), w, h, linewidth=1, edgecolor=c, facecolor="none"))
-            # ax.text(x, y, f"{model.class_names[class_id]}\np={prob:.2f}", weight="bold", va="top", color=c)
-        return image
-    
-    def describe(self):
-        """ Short description of the detection results """
-        description = ""
-        for i, (category_id, conf) in enumerate(zip(self.category_ids, self.confidence)) :
-            if i > 0:
-                description += "; "
-            description += f"{self.category_names_coco[category_id]} {conf:.2f}"
-        return description + "."
+from .utils import DetectResult
 
 class Detector():
     """ Wrapper for NN detector (should be extended for new models support) """
@@ -219,7 +83,7 @@ class Detector():
     def detect(self,
             images_raw : List[np.ndarray],
             confidence_threshold : float,
-            categories : List[str]) :
+            category_ids : Union[List[int], np.ndarray]) :
         """
         Detect object of specific classes in the input 8-bit images list with confidence above the threshold.
 
@@ -229,8 +93,8 @@ class Detector():
             List of input 8-bit images.
         confidence_threshold
             Minimal probability for the detected object category to be accepted.
-        categories
-            List of possible categories to detect.
+        category_ids
+            List of integer category-indices to detect. Index is in range from 0 to Num of categories - 1.
         """
         w_model, h_model, c_model = self.img_whc
         imgs_batch = []
@@ -254,36 +118,25 @@ class Detector():
         detect_tensor = self._yolo(torch.stack(imgs_batch))[0].permute(0, 2, 1)
 
         detect_results = []
-        for img_id, prediction_tensor in enumerate(detect_tensor):
-            detect_results.append( self._unpack_predictions(prediction_tensor, confidence_threshold, categories) )
+        for _, prediction_tensor in enumerate(detect_tensor):
+            detect_results.append( self._unpack_predictions(prediction_tensor, confidence_threshold, category_ids) )
         return detect_results
-
-    def get_device_memory_available(self):
-        """ Amount of free GPU memory in (GiB) and free/total ratio """
-        if "cuda" in str(self._device):
-            mem_total = torch.cuda.get_device_properties(self._device).total_memory
-            mem_allocated = torch.cuda.max_memory_allocated(self._device)
-            mem_free = mem_total - mem_allocated
-            return mem_free  / 2**30, mem_free / mem_total
-        else:
-            return 0, 0
 
     def _unpack_predictions(
             self,
             prediction_tensor: torch.Tensor,
             confidence_threshold: float,
-            categories:List[str]) :
+            category_ids:Union[List[int], np.ndarray]) :
         assert prediction_tensor.ndim == 2
-        assert prediction_tensor.shape[-1] == 4 + len(DetectResult.category_names_coco)
+        assert prediction_tensor.shape[-1] > 4 + np.max(category_ids)
 
-        category_ids_subset = np.where(np.isin(DetectResult.category_names_coco, categories))[0]
-        category_ids_subset = torch.Tensor(category_ids_subset).to(prediction_tensor.device)
+        category_ids = torch.Tensor(category_ids).to(prediction_tensor.device)
 
         class_probs_all = prediction_tensor[:, 4:]
-        category_ids = torch.argmax(class_probs_all, dim=-1)
-        class_confidences = torch.take_along_dim(class_probs_all, category_ids[:, None], dim=-1).flatten()
+        category_ids_pred = torch.argmax(class_probs_all, dim=-1)
+        class_confidences = torch.take_along_dim(class_probs_all, category_ids_pred[:, None], dim=-1).flatten()
 
-        mask = (class_confidences > confidence_threshold) & torch.isin(category_ids, category_ids_subset)
+        mask = (class_confidences > confidence_threshold) & torch.isin(category_ids_pred, category_ids)
 
         xy_bounds = prediction_tensor[mask,:4]
         obj_bboxes = torch.empty(xy_bounds.shape) # ((top left x, top left y), (bottom right x, bottom right y))
@@ -297,18 +150,31 @@ class Detector():
         obj_bboxes[:,(1,3)] /= h
 
         return DetectResult(
-            category_ids[mask].cpu().detach().numpy(),
+            category_ids_pred[mask].cpu().detach().numpy(),
             class_confidences[mask].cpu().detach().numpy(),
             obj_bboxes.cpu().detach().numpy() )
 
     def _adapt_float_type(self, img: torch.Tensor) :
         return img.half() if self._is_model_fp16 else img.float()  # uint8 to fp16/32
 
-if __name__ == "__main__":
-    import time, argparse, json
-    from camera import FolderImgReader
+    def get_device_memory_available(self):
+        """ Amount of free GPU memory in (GiB) and free/total ratio """
+        if "cuda" in str(self._device):
+            mem_total = torch.cuda.get_device_properties(self._device).total_memory
+            mem_allocated = torch.cuda.max_memory_allocated(self._device)
+            mem_free = mem_total - mem_allocated
+            return mem_free  / 2**30, mem_free / mem_total
+        else:
+            return 0, 0
 
-    logging.basicConfig(level=logging.INFO)
+if __name__ == "__main__":
+    import time, argparse
+    import cv2
+    
+    from .camera import FolderImgReader
+    from .utils import setup_logger, load_config, generate_rgb8_colors
+
+    setup_logger(verbose=True)
 
     parser = argparse.ArgumentParser(description="Check Yolo detector.")
     parser.add_argument("config_json_path", type=str, help="Path to the main config file.")
@@ -316,19 +182,24 @@ if __name__ == "__main__":
     parser.add_argument("output_images_path", type=str, help="If specific objects are found, images with bounding boxes are saved here.")
     args = parser.parse_args()
 
-    with open(args.config_json_path, "r") as file:
-        config_dict = json.load(file)
+    config_dict = load_config(args.config_json_path)
     
     detector = Detector(**config_dict["Detector"]["Init"])
-    categories = config_dict["Detector"]["categories"]
-    confidence_threshold = config_dict["Detector"]["confidence_threshold"]
+    
+    category_names_all = config_dict["Detector"]["categories_all"].split(",")
+    category_names_notify = config_dict["Detector"]["categories_notify"].split(",")
+    category_ids_notify = DetectResult.get_ids(category_names_all, category_names_notify)
+    category_colors = generate_rgb8_colors(len(category_names_all))
+    
+    # Lower confidence for the visualization
+    confidence_threshold = config_dict["Detector"]["confidence_threshold"] / 2
     bbox_merge_dist = config_dict["Detector"]["bbox_merge_dist"]
 
-    # Dry run
+    # Dry run, just in case test resolution is 2x bigger
     w, h, c = detector.img_whc
     timg_batch = np.random.randint(0, 255, (4, h * 2, w * 2, c), dtype=np.uint8)
     start_time = time.time()
-    _ = detector.detect(timg_batch, 0.01, categories)[0].merge(bbox_merge_dist)
+    _ = detector.detect(timg_batch, 0.01, category_ids_notify)[0].merge(bbox_merge_dist)
     proc_time = time.time() - start_time
     print(f"Dry run for {timg_batch.shape} in {proc_time:.2f} sec.")
 
@@ -338,16 +209,17 @@ if __name__ == "__main__":
 
     for img_id, (status, img) in enumerate(FolderImgReader(args.input_images_path)):
         start_time = time.time()
-        detect_result = detector.detect([img], confidence_threshold, categories)[0]
+        detect_result: DetectResult = detector.detect([img], confidence_threshold, category_ids_notify)[0]
         proc_time = time.time() - start_time
         print(f"For image #{img_id} found {detect_result.num_objects} objects in {proc_time:.2f} sec.")
         if detect_result.num_objects > 0:
             start_time = time.time()
             detect_result = detect_result.merge(bbox_merge_dist)
             proc_time = time.time() - start_time
-            print(f"{detect_result.num_objects} objects left after merge ({proc_time:.2f} sec): {detect_result.describe()}")
+            print(f"{detect_result.num_objects} objects left after merge ({proc_time:.2f} sec): {detect_result.describe(category_names_all)}")
             cv2.imwrite(
-                os.path.join(args.output_images_path, f"img_{img_id}.jpg"), detect_result.draw(img))
+                os.path.join(args.output_images_path, f"img_{img_id}.jpg"),
+                detect_result.draw(img, category_names_all, category_colors))
 
     mem_gpu_gb, mem_gpu_rel = detector.get_device_memory_available()
     print(f"Cuda memory available: {mem_gpu_gb:.2f} GiB ({mem_gpu_rel:.2f})")

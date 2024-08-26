@@ -31,7 +31,7 @@ git clone https://github.com/WongKinYiu/yolov9.git
 cd yolov9
 wget https://github.com/WongKinYiu/yolov9/releases/download/v0.1/yolov9-m-converted.pt
 ```
-&nbsp;Add 2 new paths to `config.json` (see below an example). Then run `python watchdog/detector.py config.json <path to test image dir>` to verify that detection works.
+&nbsp;Add 2 new paths to `config.json` (see below an example). Then run `python -m watchdog.detector config.json <path to test image dir>` to verify that detection works.
 
 &nbsp;3. [Optional] Register your watchdog-bot in Telegram: basically, send <a href="https://telegram.me/BotFather">@BotFather</a> the command `/newbot` to get token-string (keep it SECRET!).
 <br>
@@ -39,24 +39,24 @@ wget https://github.com/WongKinYiu/yolov9/releases/download/v0.1/yolov9-m-conver
 <br>
 &nbsp;&nbsp;&nbsp;3.2. Copy-paste the token to the configuration file `config.json`.
 <br>
-&nbsp;&nbsp;&nbsp;3.3. Run `python watchdog/bot.py configs/config.json` to initialize chat-id in the config.
+&nbsp;&nbsp;&nbsp;3.3. Run `python -m watchdog.bot configs/config.json` to initialize chat-id in the config.
 <br>
 Alright, the environment is set!
 
 ## Cameras configration
 Last but not least is to **configure the cameras**. USB or IP, one or many - doesn't matter. First of all it's recommended to use <a href="https://www.videolan.org/vlc/">VLC</a> to check the camera (ip-connection). Then fill the missing fields in `configs/config.json`.
 <br>
-Below is the complete example. Follow the descriptions there to setup your own configuration and run `python watchdog/camera.py configs/config.json` to make sure that images are captured correctly.
+Below is the complete example. Follow the descriptions there to setup your own configuration and run `python -m watchdog.camera configs/config.json` to make sure that images are captured correctly.
 
 ## Start
-When the missing fields from `configs/config.json` are filled, run the Watchdog by executing the `start_watchdog.py`, e.g.:
+When the missing fields from `configs/config.json` are filled, run the Watchdog by executing the main script, e.g.:
 ```shell
 cd /home/user/watchdog
-python start_watchdog.py configs/config.json
+python -m watchdog.main configs/config.json
 ```
 Or, for example, run a detached process via temporary ssh-connection (linux-shell command):
 ```shell
-nohup python start_watchdog.py configs/config.json &> log_nohup.txt &
+nohup python -m watchdog.main configs/config.json &> log_nohup.txt &
 ```
 That's it! Now watchdog will record activity and Telegram-bot will speak and report!
 <br>
@@ -87,18 +87,19 @@ touch /home/user/recordings/stop
             "yolo_lib_path" : "/home/user/yolov9",
             // Path to the model weights
             "checkpoint_path" : "/home/user/yolov9/yolov9-m-converted.pt",
-            // Resolution used for faster inference, so far it's (1920, 1080) * k, k = 1024 / 1920.
-            // Adjust if cameras have another aspect (padding might be needed, e.g. w/h mod 32 == 0)
+            // Resolution used for faster inference, so far it's (1920, 1080) * k, k = 1024 / 1920. Adjust if cameras have another aspect (padding might be needed, e.g. w/h mod 32 == 0)
             "img_width_height_channels" : [1024, 576, 3],
             // Processing unit: auto, cpu, cuda
             "device_switch" : "auto",
             // Switch to lighter (fp32 -> fp16) computations (if possible)
             "is_model_fp16" : false
         },
+        // All detectable classes/object categories (comma-separated), e.g. for Yolo it's 80 categories from COCO 2017 dataset http://cocodataset.org
+        "categories_all" : "person,bicycle,car,motorcycle,airplane,bus,train,truck,boat,traffic light,fire hydrant,stop sign,parking meter,bench,bird,cat,dog,horse,sheep,cow,elephant,bear,zebra,giraffe,backpack,umbrella,handbag,tie,suitcase,frisbee,skis,snowboard,sports ball,kite,baseball bat,baseball glove,skateboard,surfboard,tennis racket,bottle,wine glass,cup,fork,knife,spoon,bowl,banana,apple,sandwich,orange,broccoli,carrot,hot dog,pizza,donut,cake,chair,couch,potted plant,bed,dining table,toilet,tv,laptop,mouse,remote,keyboard,cell phone,microwave,oven,toaster,sink,refrigerator,book,clock,vase,scissors,teddy bear,hair drier,toothbrush",
+        // Categories for notifications (images with the objects saved asap on the disk and send via bot)
+        "categories_notify" : "person,bird,cat,dog",
         // How confident the detector must be to signal/alarm with the bot, 0 < confidence_threshold < 1
         "confidence_threshold" : 0.8,
-        // Which types of objects to detect, see detector.py for the list
-        "categories" : ["person", "bird", "cat", "dog"],
         // Merge close bounding boxes represented with normalized 4-vector (x_low, y_low, x_high, y_high) in [0,1]^4
         "bbox_merge_dist" : 0.01
     },

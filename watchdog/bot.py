@@ -94,7 +94,8 @@ class CameraTeleBotComm(TeleBotComm):
     def __init__(self,
                  warning_timeout:int,
                  detect_conf_thr:float,
-                 detect_categories:List[str],
+                 categories_all:List[str],
+                 categories_notify:List[str],
                  *args, 
                  **kwargs):
         super().__init__(*args, **kwargs)
@@ -112,7 +113,8 @@ class CameraTeleBotComm(TeleBotComm):
         self.detect_conf_thr = detect_conf_thr
         self._args_desc["P"] = "Detection confidence/probability threshold [0.1 ... 1], e.g. 'P 0.5', or 'P 1' to disable all notifications"
 
-        self.detect_categories = detect_categories
+        self.categories_all = categories_all
+        self.categories_notify = categories_notify
         self._args_desc["O"] = "List of object categories to detect, e.g. 'O person dog cat bird'"
 
         self._help = "Watchdog bot usage:\n<parameter> [value]\nParameters:\n"
@@ -164,12 +166,18 @@ class CameraTeleBotComm(TeleBotComm):
             else:# parameter_name == "O":
                 value = re.split("\W+", msg)
                 if len(value) <= 1:
-                    estr = f"Invalid parameter {parameter_name} structure!"
+                    estr = f"Invalid object names, possible format is 'O person dog cat bird' !"
                     logging.warning(estr)
                     self.send_message(estr)
                     return False
                 value = value[1:]
-                self.detect_categories = value
+                if not np.all(np.isin(value, self.categories_all)):
+                    estr = f"Invalid object category, use values from the following list: {' '.join(self.categories_all)}"
+                    logging.warning(estr)
+                    self.send_message(estr)
+                    return False
+
+                self.categories_notify = value
         else:
             estr = f"Invalid parameter {parameter_name} value! Send 'H' for help."
             logging.warning(estr)
@@ -182,19 +190,20 @@ class CameraTeleBotComm(TeleBotComm):
         return self.send_message(estr)
 
 if __name__ == "__main__":
-    import argparse, json, time
+    import argparse, time
 
-    logging.basicConfig(level=logging.INFO)
+    from .utils import setup_logger, load_config, save_config
+    setup_logger(verbose=True)
 
     parser = argparse.ArgumentParser(description="Verify Telegram bot communication (with TOKEN from Telegram's '@BotFather'): acquires chat-id, updates config, and checks communication!")
     parser.add_argument("config_json_path", type=str, help="Path to the main config file with the TOKEN")
     args = parser.parse_args()
 
-    with open(args.config_json_path, "r") as file:
-        config_dict = json.load(file)
-
+    config_dict = load_config(args.config_json_path)
     token = config_dict["Bot"]["token"]
     chat_id_str = config_dict["Bot"]["chat_id"]
+    category_names_all = config_dict["Detector"]["categories_all"].split(",")
+    category_names_notify = config_dict["Detector"]["categories_notify"].split(",")
 
     if token == "":
         raise ValueError("'token' is not set in the config!")
@@ -205,13 +214,12 @@ if __name__ == "__main__":
         if bot.chat_id is None :
             raise RuntimeError("No active user messages found, unable to get chat-id. Text something to the bot and restart!")
         chat_id_str = str(bot.chat_id)
-        with open(args.config_json_path, "w") as file:
-            config_dict["Bot"]["chat_id"] = chat_id_str
-            file.write(json.dumps(config_dict, indent=4))
-        print("Chat-id is set!")
+        config_dict["Bot"]["chat_id"] = chat_id_str
+        save_config(args.config_json_path, config_dict)
+        print(f"Chat-id updated in {args.config_json_path}.")
 
-    bot = CameraTeleBotComm(0,0.99,["person", "dog", "cat", "car"], token, int(chat_id_str))
-    print("Bot is ready! Check your Telegram...")
+    bot = CameraTeleBotComm(0,0.99, category_names_all, category_names_notify, token, int(chat_id_str))
+    print("Bot is ready. Check your Telegram...")
     if not bot.send_message("Try to set some parameter..."):
         raise RuntimeError("Communication failure!")
 

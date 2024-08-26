@@ -16,8 +16,9 @@
             "device_switch" : "auto",
             "is_model_fp16" : false
         },
+        "categories_all" : "",
+        "categories_notify" : "",
         "confidence_threshold" : 0.8,
-        "categories" : ["person", "bird", "cat", "dog"],
         "bbox_merge_dist" : 0.01
     },
     "Bot" :

@@ -1,6 +1,6 @@
-import sys, os, time, pathlib, re, logging
+import os, time, pathlib, re, logging
 
-from typing import List, Union, Tuple, Optional, Dict
+from typing import List, Union, Tuple, Dict
 
 import numpy as np
 
@@ -259,45 +259,16 @@ class FolderImgReader():
     def isOpened(self):
         return True
 
-def setup_logger(verbose:bool, filepath:Optional[str] = None) :
-    class StreamToLogger(object):
-        """
-        Redirect STDOUT and STDERR to the root-log
-        originates from 
-        https://stackoverflow.com/questions/19425736/how-to-redirect-stdout-and-stderr-to-logger-in-python
-        """
-        def __init__(self, logger:logging.Logger, level:int):
-            self.logger = logger
-            self.level = level
-            self.linebuf = ''
-        def write(self, buf:str):
-            for line in buf.splitlines():
-                line = line.rstrip()
-                if len(line) > 0:
-                    self.logger.log(self.level, line)
-        def flush(self):
-            pass
-
-    logging.basicConfig(
-        format="%(asctime)s %(process)6d %(levelname)8s %(message)s",
-        handlers=[logging.FileHandler(filepath, encoding="utf-8")] if filepath is not None else None,
-        level=logging.INFO if verbose else logging.ERROR)
-
-    root_log = logging.getLogger("")
-    sys.stdout = StreamToLogger(root_log, logging.INFO)
-    sys.stderr = StreamToLogger(root_log, logging.ERROR)
-
 if __name__ == "__main__":
-    import argparse, json
+    import argparse
+    from .utils import setup_logger, load_config
 
     parser = argparse.ArgumentParser(description="Record test data from cameras")
     parser.add_argument("config_json_path", type=str, help="Path to the main config file")
     args = parser.parse_args()
 
-    with open(args.config_json_path, "r") as file:
-        config_dict = json.load(file)
-    
-    setup_logger(config_dict["Watchdog"]["verbose"])
+    config_dict = load_config(args.config_json_path)
+    setup_logger(verbose=config_dict["Watchdog"]["verbose"])
 
     save_path = config_dict["Watchdog"]["output_path"]
     if not os.path.exists(save_path):
