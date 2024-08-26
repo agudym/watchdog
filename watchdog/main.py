@@ -1,237 +1,286 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 
-import os, time, logging
+import os, time, datetime, logging, argparse
+
 import concurrent.futures, multiprocessing
 import multiprocessing.managers
+
 import numpy as np
 
-# sklearn should go before cv2 due to some bug...
-from .camera import CameraConfig, CamMultiprocReader
+# sklearn (import from .utils) should go before cv2 due to some bug...
+from .utils import load_config, setup_logger, DetectResult, desc_system_resources
 import cv2
 
+from .camera import CameraConfig, CamMultiprocReader
 from .bot import CameraTeleBotComm
-from .utils import DetectResult, setup_logger, desc_system_resources
 
-class MultiCamWatchdog():
-    """ Director of multi-camera(multi-process) capture and nn-model detection """
+class ProcessIO :
+    """
+    Auxiliary settings/data structure, with the 2 kind of fields:
+    1. local process data, originally shared via COPY between processes 
+    2. global exchangeable data between processes
+    """
+    def __init__(self, config_json_path:str):
+        config_dict = load_config(config_json_path)
 
-    def __init__( self, config_dict : Dict ):
-        """ Parse config-file settings """
-        try:
-            self._executor = concurrent.futures.ProcessPoolExecutor(max_workers=1)
-            self._manager = multiprocessing.Manager()
-            self._ns = self._manager.Namespace() # multi-process interchange
-            self._saving_futures = []
+        self.loc_output_path = config_dict["Watchdog"]["output_path"]
+        if not os.path.exists(self.loc_output_path):
+            os.makedirs(self.loc_output_path)
 
-            self._output_path = config_dict["Watchdog"]["output_path"]
-            if not os.path.exists(self._output_path):
-                os.makedirs(self._output_path)
+        setup_logger(
+            config_dict["Watchdog"]["verbose"],
+            filepath=os.path.join(self.loc_output_path, "log.txt"))
 
-            setup_logger(
-                config_dict["Watchdog"]["verbose"],
-                filepath=os.path.join(self._output_path, "log.txt"))
+        self._manager = multiprocessing.Manager()
+        self.glob = self._manager.Namespace() # multi-process interchange
+        # Signalling conditional variables
+        self.glob_condition_notify = multiprocessing.Condition()
+        self.glob_condition_stats = multiprocessing.Condition()
 
-            self._stop_file = os.path.join(self._output_path, "stop")
-            if os.path.exists(self._stop_file):
-                raise RuntimeError(f"Can't start, because {self._stop_file} file already exists, delete it first.")
+        self.loc_stop_file = os.path.join(self.loc_output_path, "stop")
+        if os.path.exists(self.loc_stop_file):
+            raise RuntimeError(f"Can't start, because {self.loc_stop_file} file already exists, delete it first.")
+        self.glob.is_stopped = False
 
-            # Init Yolo-detector
-            self._config_yolo_detector = config_dict["Detector"]["Init"]
+        # NN-detector configuration
+        self.loc_detector_config = config_dict["Detector"]["Init"]
 
-            # Key Detection parameters
-            self._ns.category_names_all = config_dict["Detector"]["categories_all"].split(",")
-            category_names_notify = config_dict["Detector"]["categories_notify"].split(",")
-            self._ns.category_ids_notify = DetectResult.get_ids(self._ns.category_names_all, category_names_notify)
-            self._ns.detect_conf_thr = config_dict["Detector"]["confidence_threshold"]
-            self._ns.bbox_merge_dist = config_dict["Detector"]["bbox_merge_dist"]
+        # Key Detection parameters
+        self.loc_category_names_all = config_dict["Detector"]["categories_all"].split(",")
+        self.loc_bbox_merge_dist = config_dict["Detector"]["bbox_merge_dist"]
+        category_names_notify = config_dict["Detector"]["categories_notify"].split(",")
+        # Bot-updated values
+        self.glob.category_ids_notify = DetectResult.get_ids(self.loc_category_names_all, category_names_notify)
+        self.glob.detect_conf_thr = config_dict["Detector"]["confidence_threshold"]
 
-            # Extract cameras settings
-            self._cams_config = CameraConfig.parse(config_dict["Cameras"])
+        # Extract cameras settings
+        self.loc_cams_config = CameraConfig.parse(config_dict["Cameras"])
+        self.glob.detections_total = [0] * len(self.loc_cams_config)
 
-            # Log images with given frequency
-            self._ns.img_log_timeout = config_dict["Watchdog"]["img_log_timeout"] # seconds
-            self._ns.img_log_time = 0
+        # Log images with given frequency
+        self.loc_img_log_timeout = config_dict["Watchdog"]["img_log_timeout"] # seconds
+        self.loc_img_log_time = 0.
 
-            # Init Telegram bot
-            token = config_dict["Bot"]["token"]
-            chat_id_str = config_dict["Bot"]["chat_id"]
+        # Init Telegram bot
+        token = config_dict["Bot"]["token"]
+        chat_id_str = config_dict["Bot"]["chat_id"]
 
-            # How often bot notifications can appear
-            self._ns.bot_warning_timeout = config_dict["Bot"]["bot_warning_timeout"] # seconds
-            self._ns.bot_warning_time = 0
+        # How often bot notifications can appear
+        self.glob.bot_warning_timeout = config_dict["Bot"]["bot_warning_timeout"] # seconds
+        self.loc_bot_warning_time = 0.
 
-            self._ns.bot = None
-            if token != "" and chat_id_str != "":
-                self._ns.bot = CameraTeleBotComm(
-                    self._ns.bot_warning_timeout,
-                    self._ns.detect_conf_thr,
-                    self._ns.category_names_all,
-                    category_names_notify,
-                    token, int(chat_id_str) )
-            while not self._is_user_stopped():
-                concurrent.futures.wait(self._saving_futures)
-                try:
-                    self._run_pipeline()
-                except (concurrent.futures.process.BrokenProcessPool, BrokenPipeError) as e:
-                    logging.error(f"{repr(e)}. Restart...")
+        self.loc_bot = None
+        if token != "" and chat_id_str != "":
+            self.loc_bot = CameraTeleBotComm(
+                self.glob.bot_warning_timeout,
+                self.glob.detect_conf_thr,
+                self.loc_category_names_all,
+                category_names_notify,
+                token, int(chat_id_str) )
 
-        except Exception as e:
-            logging.critical(repr(e))
-            raise
+    def add_cameras_image(
+            self,
+            img_cams_all: List[Optional[np.ndarray]],
+            detections_all: List[DetectResult],
+            timestamp: float,
+            inference_time: float ) :
+        self.glob.img_data = (img_cams_all, detections_all, timestamp, inference_time)
 
-    def _run_pipeline(self):
-        with CamMultiprocReader(self._cams_config) as cams_reader:
-            # Imports Pytorch, AFTER camera processes start to preserve memory
-            # TODO make a separate detection process
-            from .detector import Detector
-            detector = Detector(**self._config_yolo_detector)
+    def get_cameras_image(self) :
+        return self.glob.img_data
 
-            detections_total = [0] * len(self._cams_config)
-            while not self._is_user_stopped() :
-                timestamp_str, self._ns.start_time = time.strftime(f"%Y%m%d_%H%M%S"), time.time()
+    def get_img_path(self, timestamp:float) :
+        timestamp_str = datetime.datetime.fromtimestamp(timestamp).strftime(f"%Y%m%d_%H%M%S")
+        img_root_path = os.path.join(self.loc_output_path, timestamp_str[:8])# new folder everyday!
+        return img_root_path, timestamp_str
 
-                img_root_path = os.path.join(self._output_path, timestamp_str[:8])# new folder everyday!
-                if not os.path.exists(img_root_path):
-                    os.makedirs(img_root_path)
+    def __enter__(self):
+        return self
 
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.glob.is_stopped = True
+
+def detect_process(proc_io: ProcessIO):
+    """ Read batch of images and run detection, fire conditionals for saving/notification """
+    try:
+        num_cams = len(proc_io.loc_cams_config)
+        cams_reader = None
+        cams_reader = CamMultiprocReader(proc_io.loc_cams_config)
+
+        # Imports Pytorch, AFTER camera processes start to preserve memory
+        from .detector import Detector
+        detector = Detector(**proc_io.loc_detector_config)
+
+        while not proc_io.glob.is_stopped :
+            if os.path.exists(proc_io.loc_stop_file):
+                logging.info(f"The Watchdog has been stopped with {proc_io.loc_stop_file}.")
+                break
+
+            timestamp = time.time()
+
+            try :
                 img_cams_all = cams_reader.read_frames()
+            except concurrent.futures.process.BrokenProcessPool as e:
+                logging.error(f"{repr(e)}. Restart capturing...")
+                cams_reader.stop()
+                cams_reader = CamMultiprocReader(proc_io.loc_cams_config)
+                continue
 
-                img_cams_act = [img for img in img_cams_all if img is not None]
-                if len(img_cams_act) > 0:
-                    detections_act = detector.detect(
-                        img_cams_act, self._ns.detect_conf_thr, self._ns.category_ids_notify)
-                else:
-                    detections_act = []
+            detections_total = proc_io.glob.detections_total[:]
+            detection_trigger = False
+            detections_all = [DetectResult()] * num_cams
+            img_cams_active = [img for img in img_cams_all if img is not None]
+            if len(img_cams_active) > 0:
+                detections_active = detector.detect(
+                    img_cams_active,
+                    proc_io.glob.detect_conf_thr,
+                    proc_io.glob.category_ids_notify)
+                j = 0
+                for cam_id, img in enumerate(img_cams_all):
+                    if img is not None:
+                        detections_all[cam_id] = detections_active[j]
+                        j += 1
+                        detection_trigger = detection_trigger or detections_all[cam_id].num_objects > 0
+                        detections_total[cam_id] += 1
 
-                cam_ids_act = []
-                for cam_id, image in enumerate(img_cams_all) :
-                    if image is None:
-                        continue
-                    
-                    detection = detections_act[len(cam_ids_act)]
-                    cam_ids_act.append(cam_id)
-                    if detection.num_objects == 0:
-                        continue
+            inference_time = time.time() - timestamp
 
-                    detections_total[cam_id] += 1
-                    # In a separate process finalize (merge) detection results, save images and send message
-                    self._run_process(
-                        self._warning_process,
-                        self._ns,
-                        detection,
-                        image,
-                        f"#{cam_id+1} {self._cams_config[cam_id].name}",
-                        os.path.join(img_root_path, timestamp_str + "_cam" + str(cam_id+1)) )
+            if detection_trigger:
+                with proc_io.glob_condition_notify :
+                    proc_io.glob.detections_total = detections_total
+                    proc_io.add_cameras_image(img_cams_all, detections_all, timestamp, inference_time )
+                    proc_io.glob_condition_notify.notify()
+            else:
+                with proc_io.glob_condition_stats :
+                    proc_io.add_cameras_image(img_cams_all, detections_all, timestamp, inference_time )
+                    proc_io.glob_condition_stats.notify()
 
-                inference_time = time.time() - self._ns.start_time
-                statistics_msg = f"Inference({len(img_cams_act):3} cams) {inference_time:5.3f} sec. " \
-                                 f"Detections: {detections_total}. " \
-                                 f"{desc_system_resources(img_root_path)}"
-                logging.info(statistics_msg)
+    except Exception as e:
+        logging.critical(f"Detection process exception: {repr(e)}")
+    finally:
+        proc_io.glob.is_stopped = True
+        if cams_reader is not None:
+            cams_reader.stop()
 
-                # Save images and send log message (if bot-status request happened)
-                self._run_process(
-                    self._log_process,
-                    self._ns,
-                    img_cams_act,
-                    cam_ids_act,
-                    os.path.join(img_root_path, timestamp_str),
-                    statistics_msg )
+def notify_process(proc_io: ProcessIO) :
+    """ Save images with detections, notify user via bot """
+    try :
+        bot = proc_io.loc_bot
+        while not proc_io.glob.is_stopped:
+            with proc_io.glob_condition_notify :
+                proc_io.glob_condition_notify.wait()
+                img_cams_all, detections_all, timestamp, inference_time = proc_io.get_cameras_image()
+                img_root_path, timestamp_str = proc_io.get_img_path(timestamp)
 
-    @staticmethod
-    def _log_process(
-        ns: multiprocessing.managers.Namespace,
-        img_cams_act: List[np.ndarray],
-        cam_ids: List[int],
-        img_path_prefix:str,
-        statistics_msg:str
-    ) :
-        try :
+            for cam_id, (img, detection) in enumerate(zip(img_cams_all, detections_all)) :
+                if img is None or detection.num_objects == 0:
+                    continue
+                detection_m: DetectResult = detection.merge(proc_io.loc_bbox_merge_dist)
+
+                cam_name = proc_io.loc_cams_config[cam_id].name
+                description = f"#{cam_id+1} {cam_name}: {detection_m.describe(proc_io.loc_category_names_all)}"
+                logging.info(description)
+
+                img_path = os.path.join(img_root_path, f"{timestamp_str}_cam{cam_id+1}_detect.jpg")
+                cv2.imwrite(img_path, detection_m.draw(img, proc_io.loc_category_names_all))
+
+                # Flag allows bot notifications when something is detected
+                is_bot_warn_active = timestamp - proc_io.loc_bot_warning_time > proc_io.glob.bot_warning_timeout
+                if is_bot_warn_active and bot is not None:
+                    is_ok1 = bot.send_message(description)
+                    with open(img_path, "rb") as img_file:
+                        is_ok2 = bot.send_image(img_file, os.path.split(img_path)[1])
+                    if is_ok1 and is_ok2:
+                        proc_io.loc_bot_warning_time = time.time()
+
+                # Save original image for debugging/training etc.
+                img_path = os.path.join(img_root_path, f"{timestamp_str}_cam{cam_id+1}_detect_raw.jpg")
+                cv2.imwrite(img_path, img)
+    except Exception as e:
+        logging.critical(f"Notify process exception: {repr(e)}")
+    finally:
+        proc_io.glob.is_stopped = True
+
+def stats_process(proc_io: ProcessIO) :
+    """ Save all images regularly, parse user input """
+    try :
+        bot = proc_io.loc_bot
+        while not proc_io.glob.is_stopped:
+            with proc_io.glob_condition_stats :
+                proc_io.glob_condition_stats.wait()
+                img_cams_all, detections_all, timestamp, inference_time = proc_io.get_cameras_image()
+                detections_total = proc_io.glob.detections_total[:]
+                img_root_path, timestamp_str = proc_io.get_img_path(timestamp)
+
+            if not os.path.exists(img_root_path):
+                os.makedirs(img_root_path)
+
+            num_cams_active = 0
+            for img in img_cams_all:
+                num_cams_active += int(img is not None)
+
+            statistics_msg = f"Inference({num_cams_active:3} cams) {inference_time:5.3f} sec. Detections: {detections_total}. " \
+                             f"{desc_system_resources(img_root_path)}"
+            logging.info(statistics_msg)
+
             # Flag for regular saving of captured images (logging)
-            is_img_log_active = ns.start_time - ns.img_log_time > ns.img_log_timeout
+            is_img_log_active = timestamp - proc_io.loc_img_log_time > proc_io.loc_img_log_timeout
 
             bot_status_request = False
-            if ns.bot is not None :
-                bot = ns.bot
-                if bot.parse() :
-                    bot_status_request, bot.status = bot.status, bot_status_request
+            if bot is not None and bot.parse():
+                bot_status_request, bot.status = bot.status, bot_status_request
 
-                    ns.bot_warning_timeout = bot.warning_timeout
-                    ns.detect_conf_thr = bot.detect_conf_thr
-                    ns.category_ids_notify = DetectResult.get_ids(ns.category_names_all, bot.categories_notify)
+                proc_io.glob.bot_warning_timeout = bot.warning_timeout
+                proc_io.glob.detect_conf_thr = bot.detect_conf_thr
+                proc_io.glob.category_ids_notify = DetectResult.get_ids(proc_io.loc_category_names_all, bot.categories_notify)
 
-                    if bot.exit:
-                        _ = bot.send_message("Goodbye!")
-                ns.bot = bot # trigger bot update for all processes
+                if bot.exit:
+                    logging.info(f"The Watchdog has been stopped with the bot.")
+                    _ = bot.send_message("Goodbye!")
+                    break
 
             if bot_status_request or is_img_log_active :
                 if bot_status_request:
-                    _ = ns.bot.send_message(statistics_msg)
+                    _ = bot.send_message(statistics_msg)
 
-                for cam_id, image in zip(cam_ids, img_cams_act):
-                    img_path = img_path_prefix + f"_cam{cam_id+1}_status.jpg"
-                    cv2.imwrite(img_path, image)
+                for cam_id, img in enumerate(img_cams_all):
+                    if img is None:
+                        continue
+                    img_path = os.path.join(img_root_path, f"{timestamp_str}_cam{cam_id+1}_status.jpg")
+                    cv2.imwrite(img_path, img)
 
                     if bot_status_request :
                         with open(img_path, "rb") as img_file:
-                            _ = ns.bot.send_image(img_file, os.path.split(img_path)[1])
-                if len(img_cams_act) > 0: # if there are new images then update log timer
-                    ns.img_log_time = time.time()
-        except Exception as e:
-            logging.error(f"Notifier exception: {repr(e)}")
+                            _ = bot.send_image(img_file, os.path.split(img_path)[1])
 
-    @staticmethod
-    def _warning_process(
-        ns: multiprocessing.managers.Namespace,
-        detection: DetectResult,
-        image:np.ndarray,
-        cam_desc:str,
-        img_path_prefix:str
-    ) :
-        try :
-            # Flag allows bot notifications when something is detected
-            is_bot_warn_active = ns.start_time - ns.bot_warning_time > ns.bot_warning_timeout
-
-            detection_m = detection.merge(ns.bbox_merge_dist)
-            description = f"{cam_desc}: {detection_m.describe(ns.category_names_all)}"
-            logging.info(description)
-
-            img_path = img_path_prefix + "_detect.jpg"
-            cv2.imwrite(img_path, detection_m.draw(image, ns.category_names_all))
-
-            if is_bot_warn_active and ns.bot is not None:
-                is_ok1 = ns.bot.send_message(description)
-                with open(img_path, "rb") as img_file:
-                    is_ok2 = ns.bot.send_image(img_file, os.path.split(img_path)[1])
-                if is_ok1 and is_ok2:
-                    ns.bot_warning_time = time.time()
-
-            # Save original image for debugging/training etc.
-            cv2.imwrite(img_path_prefix + "_detect_raw.jpg", image)
-        except Exception as e:
-            logging.error(f"Notifier exception: {repr(e)}")
-
-    def _run_process(self, function, *args) :
-        self._saving_futures = [job for job in self._saving_futures if not job.done()]
-        logging.debug(f"Active notify jobs {len(self._saving_futures)}.")
-        self._saving_futures.append(self._executor.submit(function, *args))
-
-    def _is_user_stopped(self):
-        if os.path.exists(self._stop_file):
-            logging.info(f"The Watchdog has been stopped with {self._stop_file}.")
-            return True
-        if self._ns.bot is not None and self._ns.bot.exit :
-            logging.info(f"The Watchdog has been stopped with the bot.")
-            return True
-        return False
+                if num_cams_active > 0: # if there are new images then update log timer
+                    proc_io.loc_img_log_time = time.time()
+    except Exception as e:
+        logging.critical(f"Stats process exception: {repr(e)}")
+    finally:
+        proc_io.glob.is_stopped = True
 
 if __name__ == "__main__":
-    import argparse
-    from .utils import load_config
-    parser = argparse.ArgumentParser(description="Run watchdog: Initialize detector, cameras and communication bot, according to the configuration. "
-                                             " Create empty file 'stop' in the output dir to interrupt the process. See ReadMe.md for help!")
-    parser.add_argument("config_json_path", type=str, help="Path to the main config file")
-    args = parser.parse_args()
+    try:
+        parser = argparse.ArgumentParser(
+            description="Run watchdog: Initialize detector, cameras and communication bot, according to the configuration. "
+                        "Create empty file 'stop' in the output dir to interrupt the process. See ReadMe.md for help!")
+        parser.add_argument("config_json_path", type=str, help="Path to the main config file")
+        args = parser.parse_args()
 
-    # Set and run watchdog!
-    MultiCamWatchdog(load_config(args.config_json_path))
+        with ProcessIO(args.config_json_path) as proc_io:
+            # Starting 3 main processes
+            processes = []
+
+            processes.append( multiprocessing.Process(target=detect_process, args=(proc_io,)) )
+            processes.append( multiprocessing.Process(target=notify_process, args=(proc_io,)) )
+            processes.append( multiprocessing.Process(target=stats_process, args=(proc_io,)) )
+
+            for p in processes:
+                p.start()
+            for p in processes:
+                p.join()
+
+    except Exception as e:
+        logging.critical(f"Main process exception: {repr(e)}")
+
