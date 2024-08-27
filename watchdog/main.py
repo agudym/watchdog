@@ -99,6 +99,10 @@ class ProcessIO :
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.glob.is_stopped = True
+        with proc_io.glob_condition_notify :
+            self.glob_condition_notify.notify()
+        with proc_io.glob_condition_stats :
+            self.glob_condition_stats.notify()
 
 def detect_process(proc_io: ProcessIO):
     """ Read batch of images and run detection, fire conditionals for saving/notification """
@@ -111,12 +115,13 @@ def detect_process(proc_io: ProcessIO):
         from .detector import Detector
         detector = Detector(**proc_io.loc_detector_config)
 
-        while not proc_io.glob.is_stopped :
+        inference_time = 0
+        while True :
+            timestamp = time.time()
+
             if os.path.exists(proc_io.loc_stop_file):
                 logging.info(f"The Watchdog has been stopped with {proc_io.loc_stop_file}.")
                 break
-
-            timestamp = time.time()
 
             try :
                 img_cams_all = cams_reader.read_frames()
@@ -143,8 +148,6 @@ def detect_process(proc_io: ProcessIO):
                         detection_trigger = detection_trigger or detections_all[cam_id].num_objects > 0
                         detections_total[cam_id] += 1
 
-            inference_time = time.time() - timestamp
-
             if detection_trigger:
                 with proc_io.glob_condition_notify :
                     proc_io.glob.detections_total = detections_total
@@ -154,7 +157,11 @@ def detect_process(proc_io: ProcessIO):
                 with proc_io.glob_condition_stats :
                     proc_io.add_cameras_image(img_cams_all, detections_all, timestamp, inference_time )
                     proc_io.glob_condition_stats.notify()
+            # Previous value is logged
+            inference_time = time.time() - timestamp
 
+            if proc_io.glob.is_stopped:
+                break
     except Exception as e:
         logging.critical(f"Detection process exception: {repr(e)}")
     finally:
@@ -166,9 +173,11 @@ def notify_process(proc_io: ProcessIO) :
     """ Save images with detections, notify user via bot """
     try :
         bot = proc_io.loc_bot
-        while not proc_io.glob.is_stopped:
+        while True :
             with proc_io.glob_condition_notify :
                 proc_io.glob_condition_notify.wait()
+                if proc_io.glob.is_stopped:
+                    break
                 img_cams_all, detections_all, timestamp, inference_time = proc_io.get_cameras_image()
                 img_root_path, timestamp_str = proc_io.get_img_path(timestamp)
 
@@ -205,9 +214,11 @@ def stats_process(proc_io: ProcessIO) :
     """ Save all images regularly, parse user input """
     try :
         bot = proc_io.loc_bot
-        while not proc_io.glob.is_stopped:
+        while True :
             with proc_io.glob_condition_stats :
                 proc_io.glob_condition_stats.wait()
+                if proc_io.glob.is_stopped:
+                    break
                 img_cams_all, detections_all, timestamp, inference_time = proc_io.get_cameras_image()
                 detections_total = proc_io.glob.detections_total[:]
                 img_root_path, timestamp_str = proc_io.get_img_path(timestamp)
@@ -280,6 +291,8 @@ if __name__ == "__main__":
                 p.start()
             for p in processes:
                 p.join()
+
+        logging.info("Watchdog stops. Goodbye!")
 
     except Exception as e:
         logging.critical(f"Main process exception: {repr(e)}")
