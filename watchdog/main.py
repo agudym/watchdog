@@ -99,9 +99,9 @@ class ProcessIO :
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.glob.is_stopped = True
-        with proc_io.glob_condition_notify :
+        with self.glob_condition_notify :
             self.glob_condition_notify.notify()
-        with proc_io.glob_condition_stats :
+        with self.glob_condition_stats :
             self.glob_condition_stats.notify()
 
 def detect_process(proc_io: ProcessIO):
@@ -116,7 +116,7 @@ def detect_process(proc_io: ProcessIO):
         detector = Detector(**proc_io.loc_detector_config)
 
         inference_time = 0
-        while True :
+        while not proc_io.glob.is_stopped :
             timestamp = time.time()
 
             if os.path.exists(proc_io.loc_stop_file):
@@ -160,8 +160,7 @@ def detect_process(proc_io: ProcessIO):
             # Previous value is logged
             inference_time = time.time() - timestamp
 
-            if proc_io.glob.is_stopped:
-                break
+        logging.debug("Detection process exits.")
     except Exception as e:
         logging.critical(f"Detection process exception: {repr(e)}")
     finally:
@@ -175,8 +174,9 @@ def notify_process(proc_io: ProcessIO) :
         bot = proc_io.loc_bot
         while True :
             with proc_io.glob_condition_notify :
-                proc_io.glob_condition_notify.wait()
-                if proc_io.glob.is_stopped:
+                if not proc_io.glob.is_stopped:
+                    proc_io.glob_condition_notify.wait()
+                else:
                     break
                 img_cams_all, detections_all, timestamp, inference_time = proc_io.get_cameras_image()
                 img_root_path, timestamp_str = proc_io.get_img_path(timestamp)
@@ -205,6 +205,7 @@ def notify_process(proc_io: ProcessIO) :
                 # Save original image for debugging/training etc.
                 img_path = os.path.join(img_root_path, f"{timestamp_str}_cam{cam_id+1}_detect_raw.jpg")
                 cv2.imwrite(img_path, img)
+        logging.debug("Notify process exits.")
     except Exception as e:
         logging.critical(f"Notify process exception: {repr(e)}")
     finally:
@@ -216,8 +217,9 @@ def stats_process(proc_io: ProcessIO) :
         bot = proc_io.loc_bot
         while True :
             with proc_io.glob_condition_stats :
-                proc_io.glob_condition_stats.wait()
-                if proc_io.glob.is_stopped:
+                if not proc_io.glob.is_stopped :
+                    proc_io.glob_condition_stats.wait()
+                else:
                     break
                 img_cams_all, detections_all, timestamp, inference_time = proc_io.get_cameras_image()
                 detections_total = proc_io.glob.detections_total[:]
@@ -266,6 +268,7 @@ def stats_process(proc_io: ProcessIO) :
 
                 if num_cams_active > 0: # if there are new images then update log timer
                     proc_io.loc_img_log_time = time.time()
+        logging.debug("Stats process exits.")
     except Exception as e:
         logging.critical(f"Stats process exception: {repr(e)}")
     finally:
