@@ -1,9 +1,6 @@
-from typing import Dict, List, Optional
-
+from typing import List, Optional
 import os, time, datetime, logging, argparse
-
-import concurrent.futures, multiprocessing
-import multiprocessing.managers
+import multiprocessing, multiprocessing.managers
 
 import numpy as np
 
@@ -94,15 +91,18 @@ class ProcessIO :
         img_root_path = os.path.join(self.loc_output_path, timestamp_str[:8])# new folder everyday!
         return img_root_path, timestamp_str
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def stop(self) :
         self.glob.is_stopped = True
         with self.glob_condition_notify :
             self.glob_condition_notify.notify()
         with self.glob_condition_stats :
             self.glob_condition_stats.notify()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.stop()
 
 def detect_process(proc_io: ProcessIO):
     """ Read batch of images and run detection, fire conditionals for saving/notification """
@@ -123,13 +123,7 @@ def detect_process(proc_io: ProcessIO):
                 logging.info(f"The Watchdog has been stopped with {proc_io.loc_stop_file}.")
                 break
 
-            try :
-                img_cams_all = cams_reader.read_frames()
-            except concurrent.futures.process.BrokenProcessPool as e:
-                logging.error(f"{repr(e)}. Restart capturing...")
-                cams_reader.stop()
-                cams_reader = CamMultiprocReader(proc_io.loc_cams_config)
-                continue
+            img_cams_all = cams_reader.read_frames()
 
             detections_total = proc_io.glob.detections_total[:]
             detection_trigger = False
@@ -160,11 +154,11 @@ def detect_process(proc_io: ProcessIO):
             # Previous value is logged
             inference_time = time.time() - timestamp
 
-        logging.debug("Detection process exits.")
     except Exception as e:
         logging.critical(f"Detection process exception: {repr(e)}")
     finally:
-        proc_io.glob.is_stopped = True
+        logging.debug("Detection process exits.")
+        proc_io.stop()
         if cams_reader is not None:
             cams_reader.stop()
 
@@ -205,11 +199,11 @@ def notify_process(proc_io: ProcessIO) :
                 # Save original image for debugging/training etc.
                 img_path = os.path.join(img_root_path, f"{timestamp_str}_cam{cam_id+1}_detect_raw.jpg")
                 cv2.imwrite(img_path, img)
-        logging.debug("Notify process exits.")
     except Exception as e:
         logging.critical(f"Notify process exception: {repr(e)}")
     finally:
-        proc_io.glob.is_stopped = True
+        logging.debug("Notify process exits.")
+        proc_io.stop()
 
 def stats_process(proc_io: ProcessIO) :
     """ Save all images regularly, parse user input """
@@ -268,11 +262,11 @@ def stats_process(proc_io: ProcessIO) :
 
                 if num_cams_active > 0: # if there are new images then update log timer
                     proc_io.loc_img_log_time = time.time()
-        logging.debug("Stats process exits.")
     except Exception as e:
         logging.critical(f"Stats process exception: {repr(e)}")
     finally:
-        proc_io.glob.is_stopped = True
+        logging.debug("Stats process exits.")
+        proc_io.stop()
 
 if __name__ == "__main__":
     try:

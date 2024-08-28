@@ -140,14 +140,12 @@ class CamMultiprocReader():
         self._num_cams = len(self._cams_conf)
         self._timeout_read_all = np.max([cam_conf.timeout_read for cam_conf in self._cams_conf])
 
-        self._executor = concurrent.futures.ProcessPoolExecutor(max_workers=self._num_cams)
-
         self._manager = multiprocessing.Manager()
         self._images_shared = self._manager.list( [None] * self._num_cams )
         self._is_running_shared = self._manager.Value(bool, True)
         
         # Start capturing process per camera
-        self._capturing_futures = [None] * self._num_cams
+        self._cap_processes = [None] * self._num_cams
         self._restart()
 
     def read_frames(self):
@@ -160,20 +158,24 @@ class CamMultiprocReader():
 
     def stop(self):
         self._is_running_shared.value = False
-        concurrent.futures.wait([future for future in self._capturing_futures if future is not None])
+        for proc in self._cap_processes:
+            if proc is not None:
+                proc.join()
 
     def _restart(self):
         for cam_id, cam_conf in enumerate(self._cams_conf):
-            if self._capturing_futures[cam_id] is not None and not self._capturing_futures[cam_id].done():
+            if self._cap_processes[cam_id] is not None and self._cap_processes[cam_id].is_alive():
                 continue
 
             logging.info(f"New process for camera '{cam_conf.name}' starting...")
-            self._capturing_futures[cam_id] = self._executor.submit(
-                self._run_capture_process,
-                cam_id,
-                cam_conf,
-                self._images_shared,
-                self._is_running_shared)
+            self._cap_processes[cam_id] = multiprocessing.Process(
+                target=self._run_capture_process,
+                args=(
+                    cam_id,
+                    cam_conf,
+                    self._images_shared,
+                    self._is_running_shared))
+            self._cap_processes[cam_id].start()
 
     @staticmethod
     def _run_capture_process(
