@@ -153,10 +153,10 @@ def detect_process(proc_io: ProcessIO):
                     proc_io.glob.detections_total = detections_total
                     proc_io.add_cameras_image(img_cams_all, detections_all, timestamp, inference_time )
                     proc_io.glob_condition_notify.notify()
-            else:
-                with proc_io.glob_condition_stats :
-                    proc_io.add_cameras_image(img_cams_all, detections_all, timestamp, inference_time )
-                    proc_io.glob_condition_stats.notify()
+
+            with proc_io.glob_condition_stats :
+                proc_io.add_cameras_image(img_cams_all, detections_all, timestamp, inference_time )
+                proc_io.glob_condition_stats.notify()
             # Previous value is logged
             inference_time = time.time() - timestamp
 
