@@ -139,8 +139,9 @@ def detect_process(proc_io: ProcessIO):
                     if img is not None:
                         detections_all[cam_id] = detections_active[j]
                         j += 1
-                        detection_trigger = detection_trigger or detections_all[cam_id].num_objects > 0
-                        detections_total[cam_id] += 1
+                        if detections_all[cam_id].num_objects > 0 :
+                            detection_trigger = True
+                            detections_total[cam_id] += 1
 
             if detection_trigger:
                 with proc_io.glob_condition_notify :
