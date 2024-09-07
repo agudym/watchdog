@@ -163,6 +163,15 @@ def detect_process(proc_io: ProcessIO):
         if cams_reader is not None:
             cams_reader.stop()
 
+def save_image(img_path:str, img:np.ndarray) :
+    cv2.imwrite(img_path, img)
+    if os.path.exists(img_path) :
+        logging.info(f"Saved {img_path}")
+        return True
+    else:
+        logging.error(f"Failed to save {img_path}")
+        return False
+
 def notify_process(proc_io: ProcessIO) :
     """ Save images with detections, notify user via bot """
     try :
@@ -186,20 +195,18 @@ def notify_process(proc_io: ProcessIO) :
                 logging.info(description)
 
                 img_path = os.path.join(img_root_path, f"{timestamp_str}_cam{cam_id+1}_detect.jpg")
-                cv2.imwrite(img_path, detection_m.draw(img, proc_io.loc_category_names_all))
+                is_img_saved = save_image(img_path, detection_m.draw(img, proc_io.loc_category_names_all))
 
                 # Flag allows bot notifications when something is detected
                 is_bot_warn_active = timestamp - proc_io.loc_bot_warning_time > proc_io.glob.bot_warning_timeout
-                if is_bot_warn_active and bot is not None:
-                    is_ok1 = bot.send_message(description)
+                if bot is not None and is_bot_warn_active and bot.send_message(description) and is_img_saved:
                     with open(img_path, "rb") as img_file:
-                        is_ok2 = bot.send_image(img_file, os.path.split(img_path)[1])
-                    if is_ok1 and is_ok2:
-                        proc_io.loc_bot_warning_time = time.time()
+                        if bot.send_image(img_file, os.path.split(img_path)[1]) :
+                            proc_io.loc_bot_warning_time = time.time()
 
                 # Save original image for debugging/training etc.
                 img_path = os.path.join(img_root_path, f"{timestamp_str}_cam{cam_id+1}_detect_raw.jpg")
-                cv2.imwrite(img_path, img)
+                save_image(img_path, img)
     except Exception as e:
         logging.critical(f"Notify process exception: {repr(e)}")
     finally:
@@ -255,9 +262,9 @@ def stats_process(proc_io: ProcessIO) :
                     if img is None:
                         continue
                     img_path = os.path.join(img_root_path, f"{timestamp_str}_cam{cam_id+1}_status.jpg")
-                    cv2.imwrite(img_path, img)
+                    is_img_saved = save_image(img_path, img)
 
-                    if bot_status_request :
+                    if bot_status_request and is_img_saved:
                         with open(img_path, "rb") as img_file:
                             _ = bot.send_image(img_file, os.path.split(img_path)[1])
 
