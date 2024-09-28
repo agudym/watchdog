@@ -185,6 +185,9 @@ def notify_process(proc_io: ProcessIO) :
                 img_cams_all, detections_all, timestamp, inference_time = proc_io.get_cameras_image()
                 img_root_path, timestamp_str = proc_io.get_img_path(timestamp)
 
+            if not os.path.exists(img_root_path):
+                os.makedirs(img_root_path)
+
             for cam_id, (img, detection) in enumerate(zip(img_cams_all, detections_all)) :
                 if img is None or detection.num_objects == 0:
                     continue
