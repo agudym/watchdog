@@ -124,7 +124,7 @@ class DetectResult():
             description += f"{category_names_all[category_id]} {conf:.2f}"
         return description + "."
 
-def setup_logger(verbose:bool, filepath:Optional[str] = None) :
+def setup_logger(verbose_level:str, filepath:Optional[str] = None) :
     class StreamToLogger(object):
         """
         Redirect STDOUT and STDERR to the root-log
@@ -146,7 +146,7 @@ def setup_logger(verbose:bool, filepath:Optional[str] = None) :
     logging.basicConfig(
         format="%(asctime)s %(process)6d %(levelname)8s %(message)s",
         handlers=[logging.FileHandler(filepath, encoding="utf-8")] if filepath is not None else None,
-        level=logging.INFO if verbose else logging.ERROR)
+        level=verbose_level)
 
     root_log = logging.getLogger("")
     sys.stdout = StreamToLogger(root_log, logging.INFO)

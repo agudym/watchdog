@@ -174,7 +174,7 @@ if __name__ == "__main__":
     from .camera import FolderImgReader
     from .utils import setup_logger, load_config, generate_rgb8_colors
 
-    setup_logger(verbose=True)
+    setup_logger(verbose_level="INFO")
 
     parser = argparse.ArgumentParser(description="Check Yolo detector.")
     parser.add_argument("config_json_path", type=str, help="Path to the main config file.")

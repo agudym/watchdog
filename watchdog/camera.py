@@ -270,7 +270,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     config_dict = load_config(args.config_json_path)
-    setup_logger(verbose=config_dict["Watchdog"]["verbose"])
+    setup_logger(config_dict["Watchdog"]["verbose_level"])
 
     save_path = config_dict["Watchdog"]["output_path"]
     if not os.path.exists(save_path):

@@ -25,7 +25,7 @@ class ProcessIO :
             os.makedirs(self.loc_output_path)
 
         setup_logger(
-            config_dict["Watchdog"]["verbose"],
+            config_dict["Watchdog"]["verbose_level"],
             filepath=os.path.join(self.loc_output_path, "log.txt"))
 
         self._manager = multiprocessing.Manager()

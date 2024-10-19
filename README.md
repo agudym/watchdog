@@ -76,8 +76,8 @@ touch /home/user/recordings/stop
         "output_path" : "/home/user/recordings",
         // Each camera save jpg images with given frequency (even if nothing is detected), in seconds
         "img_log_timeout" : 300,
-        // Log everything to the file
-        "verbose" : true
+        // Log levels: DEBUG, INFO, WARNING, ERROR, CRITICAL. "DEBUG" to log everything, "CRITICAL" for terminal errors only...
+        "verbose_level" : "INFO"
     },
     "Detector" :
     {
@@ -165,6 +165,13 @@ Setting up hardware-accelerated decoding could be tricky but necessary to **avoi
 gst-launch-1.0 rtspsrc location=rtsp://192.168.1.101 ! rtph264depay ! nvv4l2decoder ! nvvidconv ! video/x-raw, 'width=(int)1920, height=(int)1080, format=(string)BGRx' ! videoconvert ! nv3dsink max-buffers=1 drop=True
 ```
 Also specific build of OpenCV with GStreamer support might be required. For Jetson TX1/2 follow <a href="https://gist.github.com/mtc-20/c1f324f70fad774ca6f381c07cb3f19a">instructions</a>.
+
+## Future Plans
+1. Add ROI (Notify only if object appears in the specified area)
+2. Video recording (If detection happened, record short X seconds video to preserve more data for future research)
+3. Log detections (desc + filenames)
+4. Improve bot's notification polling (avoid "ddos"), to get responses faster
+
 ## License
 
 The library and it's sources are released under the [MIT License](./LICENSE).

@@ -193,7 +193,7 @@ if __name__ == "__main__":
     import argparse, time
 
     from .utils import setup_logger, load_config, save_config
-    setup_logger(verbose=True)
+    setup_logger(verbose_level="INFO")
 
     parser = argparse.ArgumentParser(description="Verify Telegram bot communication (with TOKEN from Telegram's '@BotFather'): acquires chat-id, updates config, and checks communication!")
     parser.add_argument("config_json_path", type=str, help="Path to the main config file with the TOKEN")
