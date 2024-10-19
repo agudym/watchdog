@@ -32,7 +32,7 @@ class TeleBotComm:
 
         try:
             ret_json = self._session.post(url, timeout=self._timeout).json()
-        except requests.exceptions.ConnectionError as e:
+        except requests.exceptions.RequestException as e:
             logging.error(e)
             self._restart_connection()
             if strict:
@@ -71,7 +71,7 @@ class TeleBotComm:
                 self._url_send_message,
                 json={'chat_id': self.chat_id, 'text': msg},
                 timeout=self._timeout ).json()
-        except requests.exceptions.ConnectionError as e:
+        except requests.exceptions.RequestException as e:
             logging.error(e)
             self._restart_connection()
             return False
@@ -86,7 +86,7 @@ class TeleBotComm:
                 data={"chat_id": self.chat_id, "caption": title},
                 files={"photo": image_file},
                 timeout=self._timeout ).json()
-        except requests.exceptions.ConnectionError as e:
+        except requests.exceptions.RequestException as e:
             logging.error(e)
             self._restart_connection()
             return False
