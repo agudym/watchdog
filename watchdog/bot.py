@@ -15,6 +15,12 @@ class TeleBotComm:
         self.chat_id = chat_id
         self.last_message_id = -1
 
+        # connection timeout in seconds (prevents freeze...)
+        self._timeout = 60
+
+        self._session = None
+        self._restart_connection()
+
         # Check the latest message id
         self.get_message(strict=True)
 
@@ -25,12 +31,14 @@ class TeleBotComm:
             url += "?offset=-1"
 
         try:
-            ret_json = requests.post(url).json()
+            ret_json = self._session.post(url, timeout=self._timeout).json()
         except requests.exceptions.ConnectionError as e:
+            logging.error(e)
+            self._restart_connection()
             if strict:
                 raise
-            logging.error(e)
-            return ""
+            else:
+                return ""
 
         if self._check_ret_json(ret_json) :
             for response in ret_json["result"]:
@@ -59,10 +67,13 @@ class TeleBotComm:
             raise ValueError("Chat ID is not initialized.")
 
         try:
-            ret_json = requests.post(
-                self._url_send_message, json={'chat_id': self.chat_id, 'text': msg}).json()
+            ret_json = self._session.post(
+                self._url_send_message,
+                json={'chat_id': self.chat_id, 'text': msg},
+                timeout=self._timeout ).json()
         except requests.exceptions.ConnectionError as e:
             logging.error(e)
+            self._restart_connection()
             return False
 
         return self._check_ret_json(ret_json)
@@ -70,12 +81,14 @@ class TeleBotComm:
     def send_image(self, image_file:io.BufferedIOBase, title:str="") -> bool:
         """ Send image (return True) or return False in case of connection issues  """
         try:
-            ret_json = requests.post(
+            ret_json = self._session.post(
                 self._url_send_image,
                 data={"chat_id": self.chat_id, "caption": title},
-                files={"photo": image_file}).json()
+                files={"photo": image_file},
+                timeout=self._timeout ).json()
         except requests.exceptions.ConnectionError as e:
             logging.error(e)
+            self._restart_connection()
             return False
         
         return self._check_ret_json(ret_json)
@@ -86,6 +99,11 @@ class TeleBotComm:
         else:
             logging.error(f"Request error: {ret_json['error_code']}")
             return False
+
+    def _restart_connection(self):
+        if self._session is not None:
+            self._session.close()
+        self._session = requests.Session()
 
 class CameraTeleBotComm(TeleBotComm):
     """
@@ -193,7 +211,7 @@ if __name__ == "__main__":
     import argparse, time
 
     from .utils import setup_logger, load_config, save_config
-    setup_logger(verbose_level="INFO")
+    setup_logger(verbose_level="DEBUG")
 
     parser = argparse.ArgumentParser(description="Verify Telegram bot communication (with TOKEN from Telegram's '@BotFather'): acquires chat-id, updates config, and checks communication!")
     parser.add_argument("config_json_path", type=str, help="Path to the main config file with the TOKEN")
